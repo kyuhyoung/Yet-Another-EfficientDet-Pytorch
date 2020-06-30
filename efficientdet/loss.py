@@ -164,7 +164,8 @@ class FocalLoss(nn.Module):
 
         # debug
         imgs = kwargs.get('imgs', None)
-        if imgs is not None:
+        #print('type(imgs) : ', type(imgs)) 
+        if imgs is not None:            
             regressBoxes = BBoxTransform()
             clipBoxes = ClipBoxes()
             obj_list = kwargs.get('obj_list', None)

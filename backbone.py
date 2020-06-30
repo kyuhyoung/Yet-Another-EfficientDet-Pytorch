@@ -1,5 +1,3 @@
-# Author: Zylo117
-
 import math
 
 import torch

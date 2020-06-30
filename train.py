@@ -1,18 +1,17 @@
-# original author: signatrix
-# adapted from https://github.com/signatrix/efficientdet/blob/master/train.py
-# modified by Zylo117
-
 import datetime
 import os
 import argparse
 import traceback
+import random 
+import math
 
 import torch
 import yaml
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from efficientdet.dataset import CocoDataset, Resizer, Normalizer, Augmenter, collater
+#from efficientdet.dataset import CocoDataset, Resizer, Normalizer, Augmenter, collater
+from efficientdet.dataset import ChallengeDataset, Resizer, Normalizer, Augmenter, collater
 from backbone import EfficientDetBackbone
 from tensorboardX import SummaryWriter
 import numpy as np
@@ -31,35 +30,58 @@ class Params:
         return self.params.get(item, None)
 
 
-def get_args():
+def get_args(sys_argv = None):
     parser = argparse.ArgumentParser('Yet Another EfficientDet Pytorch: SOTA object detection network - Zylo117')
-    parser.add_argument('-p', '--project', type=str, default='coco', help='project file that contains parameters')
+    #parser.add_argument('-p', '--project', type=str, default='coco', help='project file that contains parameters')
+    parser.add_argument('-p', '--project', type=str, default='ai_challenge_2020', help='project file that contains parameters')
     parser.add_argument('-c', '--compound_coef', type=int, default=0, help='coefficients of efficientdet')
-    parser.add_argument('-n', '--num_workers', type=int, default=12, help='num_workers of dataloader')
-    parser.add_argument('--batch_size', type=int, default=12, help='The number of images per batch among all devices')
+    #parser.add_argument('-c', '--compound_coef', type=int, default=2, help='coefficients of efficientdet')
+    #parser.add_argument('-n', '--num_workers', type=int, default=12, help='num_workers of dataloader')
+    parser.add_argument('-n', '--num_workers', type=int, default=0, help='num_workers of dataloader')
+    #parser.add_argument('--batch_size', type=int, default=12, help='The number of images per batch among all devices')
+    parser.add_argument('--batch_size', type=int, default=16, help='The number of images per batch among all devices')
+    #parser.add_argument('--batch_size', type=int, default=10, help='The number of images per batch among all devices')
     parser.add_argument('--head_only', type=boolean_string, default=False,
                         help='whether finetunes only the regressor and the classifier, '
                              'useful in early stage convergence or small/easy dataset')
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--optim', type=str, default='adamw', help='select optimizer for training, '
+    #parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=1e-5)
+    #parser.add_argument('--lr', type=float, default=1e-2)
+    #parser.add_argument('--lr', type=float, default=1e-3)
+    #parser.add_argument('--optim', type=str, default='adamw', help='select optimizer for training, '
+    parser.add_argument('--optim', type=str, default='sgd', help='select optimizer for training, '
                                                                    'suggest using \'admaw\' until the'
                                                                    ' very final stage then switch to \'sgd\'')
     parser.add_argument('--num_epochs', type=int, default=500)
-    parser.add_argument('--val_interval', type=int, default=1, help='Number of epoches between valing phases')
-    parser.add_argument('--save_interval', type=int, default=500, help='Number of steps between saving')
+    #parser.add_argument('--val_interval', type=int, default=1, help='Number of epoches between valing phases')
+    #parser.add_argument('--val_interval_step', type=int, default=5, help='Number of epoches between valing phases')
+    parser.add_argument('--save_interval', type=int, default=300, help='Number of steps between saving')
+    #parser.add_argument('--save_interval', type=int, default=1, help='Number of steps between saving')
     parser.add_argument('--es_min_delta', type=float, default=0.0,
                         help='Early stopping\'s parameter: minimum change loss to qualify as an improvement')
     parser.add_argument('--es_patience', type=int, default=0,
                         help='Early stopping\'s parameter: number of epochs with no improvement after which training will be stopped. Set to 0 to disable this technique.')
     parser.add_argument('--data_path', type=str, default='datasets/', help='the root folder of dataset')
     parser.add_argument('--log_path', type=str, default='logs/')
-    parser.add_argument('-w', '--load_weights', type=str, default=None,
+    #parser.add_argument('-w', '--load_weights', type=str, default=None,
+    parser.add_argument('-w', '--load_weights', type=str, default='last',
                         help='whether to load weights from a checkpoint, set None to initialize, set \'last\' to load last checkpoint')
     parser.add_argument('--saved_path', type=str, default='logs/')
-    parser.add_argument('--debug', type=boolean_string, default=False, help='whether visualize the predicted boxes of training, '
+    #parser.add_argument('--debug', type=boolean_string, default=False, help='whether visualize the predicted boxes of training, '
+    parser.add_argument('--debug', type=boolean_string, default=True, help='whether visualize the predicted boxes of training, '
                                                                   'the output images will be in test/')
-
-    args = parser.parse_args()
+    '''
+    for ii in range(100):
+        print('random() : ', random.random())
+    exit(0);
+    '''    
+    if sys_argv is None or 1 == len(sys_argv):
+        #print('len(sys_argv) is 1')
+        args = parser.parse_args()
+        #print('args : ', args); exit()
+    else:
+        #print('sys_argv : ', sys_argv);   exit()
+        args = parser.parse_args(sys_argv)
     return args
 
 
@@ -76,32 +98,41 @@ class ModelWithLoss(nn.Module):
         self.model = model
         self.debug = debug
 
-    def forward(self, imgs, annotations, obj_list=None):
+    def forward(self, imgs, annotations, shall_display_current_result, obj_list=None):
         _, regression, classification, anchors = self.model(imgs)
-        if self.debug:
-            cls_loss, reg_loss = self.criterion(classification, regression, anchors, annotations,
-                                                imgs=imgs, obj_list=obj_list)
+        #print('self.debug : ', self.debug); exit(0);
+        if self.debug and shall_display_current_result:
+            #print('forward WITH display')
+            cls_loss, reg_loss = self.criterion(classification, regression, anchors, annotations, imgs=imgs, obj_list=obj_list)
+            #cls_loss, reg_loss = self.criterion(classification, regression, anchors, annotations, imgs=imgs, obj_list=obj_list)
         else:
+            #print('forward WITHOUT display')
             cls_loss, reg_loss = self.criterion(classification, regression, anchors, annotations)
         return cls_loss, reg_loss
 
 
-def train(opt):
+def train(opt, trainset_given = None, valset_given = None):
+    #print('opt.project : ', opt.project);   exit(0);
     params = Params(f'projects/{opt.project}.yml')
-
+    
+    #print('params.num_gpus : ', params.num_gpus);   exit(0);
     if params.num_gpus == 0:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-
+    '''
     if torch.cuda.is_available():
+        #print('cuda is available'); exit(0);
         torch.cuda.manual_seed(42)
     else:
         torch.manual_seed(42)
-
+    '''
     opt.saved_path = opt.saved_path + f'/{params.project_name}/'
     opt.log_path = opt.log_path + f'/{params.project_name}/tensorboard/'
     os.makedirs(opt.log_path, exist_ok=True)
     os.makedirs(opt.saved_path, exist_ok=True)
 
+    print('opt.batch_size : ', opt.batch_size);
+    print('opt.num_workers : ', opt.num_workers);
+    #exit(0);
     training_params = {'batch_size': opt.batch_size,
                        'shuffle': True,
                        'drop_last': True,
@@ -109,23 +140,44 @@ def train(opt):
                        'num_workers': opt.num_workers}
 
     val_params = {'batch_size': opt.batch_size,
-                  'shuffle': False,
+                  #'shuffle': False,
+                  'shuffle': True,
                   'drop_last': True,
                   'collate_fn': collater,
                   'num_workers': opt.num_workers}
 
     input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536]
-    training_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.train_set,
+    #training_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.train_set,
+    training_set = ChallengeDataset(input_side = input_sizes[opt.compound_coef], data_given = trainset_given, root_dir=os.path.join(opt.data_path, params.project_name), set=params.train_set,
                                transform=transforms.Compose([Normalizer(mean=params.mean, std=params.std),
                                                              Augmenter(),
                                                              Resizer(input_sizes[opt.compound_coef])]))
     training_generator = DataLoader(training_set, **training_params)
 
-    val_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.val_set,
+    #val_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.val_set,
+    val_set = ChallengeDataset(input_side = input_sizes[opt.compound_coef], data_given = valset_given, root_dir=os.path.join(opt.data_path, params.project_name), set=params.val_set,
                           transform=transforms.Compose([Normalizer(mean=params.mean, std=params.std),
                                                         Resizer(input_sizes[opt.compound_coef])]))
-    val_generator = DataLoader(val_set, **val_params)
+    val_gen = DataLoader(val_set, **val_params)
+    val_iterator = iter(val_gen)
+    n_iter_val = len(val_gen)
+    #n_iter_val2 = len(val_iterator)
+    
+    #val_interval_print = int(n_iter_val / 10.0)
 
+    th_prob_display_val = 0.01
+    #interval_display_val = int(n_iter_val * th_prob_display_val);
+    print('n_iter_val : ', n_iter_val)
+    #print('n_iter_val2 : ', n_iter_val2);   exit(0);
+    #print('val_interval_print : ', val_interval_print)
+    #print('interval_display_val : ', interval_display_val)
+    print('th_prob_display_val : ', th_prob_display_val)
+
+    '''
+    interval_display_val = int(n_iter_val / 20);
+    print('n_iter_val : ', n_iter_val)
+    print('interval_display_val : ', interval_display_val)
+    '''
     model = EfficientDetBackbone(num_classes=len(params.obj_list), compound_coef=opt.compound_coef,
                                  ratios=eval(params.anchors_ratios), scales=eval(params.anchors_scales))
 
@@ -204,6 +256,26 @@ def train(opt):
     model.train()
 
     num_iter_per_epoch = len(training_generator)
+    #val_interval_iter = int(num_iter_per_epoch / 5)
+    val_interval_iter = int(10)
+    #val_interval_iter = int(30)
+    print('val_interval_iter : ', val_interval_iter)
+    step_large_enough_to_consider_lr_decay = int(num_iter_per_epoch * 1.5)
+    print('step_large_enough_to_consider_lr_decay : ', step_large_enough_to_consider_lr_decay)
+    step_lap_large_enough_to_consider_lr_decay = int(num_iter_per_epoch * 0.1)
+    print('step_lap_large_enough_to_consider_lr_decay : ', step_lap_large_enough_to_consider_lr_decay)
+    interval_lr_decay = int(num_iter_per_epoch * 0.01)
+    print('interval_lr_decay : ', interval_lr_decay)
+    #exit(0);
+    #check parameter of model
+    print("------------------------------------------------------------")
+    total_params = sum(p.numel() for p in model.parameters())
+    print("num of parameter : ", total_params)
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("num of trainable_ parameter : ", trainable_params)
+    print("------------------------------------------------------------")
+
+
 
     try:
         for epoch in range(opt.num_epochs):
@@ -213,10 +285,12 @@ def train(opt):
 
             epoch_loss = []
             progress_bar = tqdm(training_generator)
-            for iter, data in enumerate(progress_bar):
-                if iter < step - last_epoch * num_iter_per_epoch:
+            for idx, data in enumerate(progress_bar):
+                '''
+                if idx < step - last_epoch * num_iter_per_epoch:
                     progress_bar.update()
                     continue
+                '''     
                 try:
                     imgs = data['img']
                     annot = data['annot']
@@ -228,25 +302,30 @@ def train(opt):
                         annot = annot.cuda()
 
                     optimizer.zero_grad()
-                    cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
+                    step_lap = step - last_step
+                    th_prob_display = min(0.01, 1.0 / math.sqrt(step_lap + 1.0)) 
+                    prob_rand = random.random()
+                    #print('AAAA');  exit(0);
+                    #print('prob_rand : ', prob_rand, ' / th_prob_display : ', th_prob_display)
+                    shall_display_current_result = prob_rand < th_prob_display and opt.debug  
+                    cls_loss, reg_loss = model(imgs, annot, shall_display_current_result, obj_list=params.obj_list)
                     cls_loss = cls_loss.mean()
                     reg_loss = reg_loss.mean()
-
-                    loss = cls_loss + reg_loss
-                    if loss == 0 or not torch.isfinite(loss):
+                    loss_train = cls_loss + reg_loss
+                    if loss_train == 0 or not torch.isfinite(loss_train):
                         continue
 
-                    loss.backward()
+                    loss_train.backward()
                     # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
                     optimizer.step()
 
-                    epoch_loss.append(float(loss))
+                    #epoch_loss.append(float(loss))
 
                     progress_bar.set_description(
                         'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
-                            step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
-                            reg_loss.item(), loss.item()))
-                    writer.add_scalars('Loss', {'train': loss}, step)
+                            step, epoch, opt.num_epochs, idx + 1, num_iter_per_epoch, cls_loss.item(),
+                            reg_loss.item(), loss_train.item()))
+                    writer.add_scalars('Loss', {'train': loss_train}, step)
                     writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
                     writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
 
@@ -255,22 +334,28 @@ def train(opt):
                     writer.add_scalar('learning_rate', current_lr, step)
 
                     step += 1
-
+                    #print('step : ', step);
+                    #print('opt.save_interval : ', opt.save_interval);  # exit(0);
                     if step % opt.save_interval == 0 and step > 0:
-                        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+                        save_checkpoint(model,  os.path.join(opt.saved_path, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth'))
                         print('checkpoint...')
 
                 except Exception as e:
                     print('[Error]', traceback.format_exc())
                     print(e)
                     continue
-            scheduler.step(np.mean(epoch_loss))
 
-            if epoch % opt.val_interval == 0:
-                model.eval()
-                loss_regression_ls = []
-                loss_classification_ls = []
-                for iter, data in enumerate(val_generator):
+                    #print('scheduler step()');  exit(0)     
+                #if epoch % opt.val_interval == 0:
+                if step > 0 and step % val_interval_iter == 0:
+                    print('validating ...') 
+                    model.eval()
+                    try:
+                        data = next(val_iterator)
+                    except:
+                        val_iterator = iter(val_gen)
+                        data = next(val_iterator)
+
                     with torch.no_grad():
                         imgs = data['img']
                         annot = data['annot']
@@ -279,7 +364,96 @@ def train(opt):
                             imgs = imgs.cuda()
                             annot = annot.cuda()
 
-                        cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
+                        prob_rand = random.random()
+                        shall_display_result_val = prob_rand < th_prob_display_val  
+                        cls_loss, reg_loss = model(imgs, annot, shall_display_result_val, obj_list = params.obj_list)
+                        cls_loss = cls_loss.mean()
+                        reg_loss = reg_loss.mean()
+                        loss_val = cls_loss + reg_loss
+ 
+
+                    '''
+                    loss_regression_ls = []
+                    loss_classification_ls = []
+                    for idx_val, data in enumerate(val_generator):
+                        if 0 == idx_val % val_interval_print:
+                            print('idx val : ', idx_val, ' / ', n_iter_val) 
+                        #if float(idx_val / val_interval_print) > 1.1:
+                        #    break    
+                        with torch.no_grad():
+                            imgs = data['img']
+                            annot = data['annot']
+
+                            if params.num_gpus == 1:
+                                imgs = imgs.cuda()
+                                annot = annot.cuda()
+
+                            prob_rand = random.random()
+                            shall_display_result_val = prob_rand < th_prob_display_val  
+                            cls_loss, reg_loss = model(imgs, annot, shall_display_result_val, obj_list = params.obj_list)
+                            cls_loss = cls_loss.mean()
+                            reg_loss = reg_loss.mean()
+                            loss = cls_loss + reg_loss
+                            if loss == 0 or not torch.isfinite(loss):
+                                continue
+
+                            loss_classification_ls.append(cls_loss.item())
+                            loss_regression_ls.append(reg_loss.item())
+                                              
+
+                    cls_loss = np.mean(loss_classification_ls)
+                    reg_loss = np.mean(loss_regression_ls)
+                    '''
+                    #loss = cls_loss + reg_loss
+
+                    print(
+                        'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
+                            epoch, opt.num_epochs, cls_loss, reg_loss, loss_val))
+                    writer.add_scalars('Loss', {'val': loss_val}, step)
+                    writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
+                    writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
+
+                    epoch_loss.append(float(loss_val))
+
+
+
+                    if loss_val + opt.es_min_delta < best_loss:
+                        best_loss = loss_val
+                        best_epoch = epoch
+
+                        save_checkpoint(model, os.path.join(opt.saved_path, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth'))
+
+                    model.train()
+                           
+                # Early stopping
+                    if epoch - best_epoch > opt.es_patience > 0:
+                        print('[Info] Stop training at epoch {}. The lowest loss achieved is {}'.format(epoch, best_loss))
+                        break
+                    #exit(0)       
+                is_time_to_consider_lr_decay = step_lap > step_lap_large_enough_to_consider_lr_decay and step > step_large_enough_to_consider_lr_decay and 0 == step % interval_lr_decay
+                if is_time_to_consider_lr_decay:                
+                    scheduler.step(np.mean(epoch_loss));    
+                    epoch_loss = [];
+
+
+
+            '''
+            scheduler.step(np.mean(epoch_loss))
+
+            if epoch % opt.val_interval == 0:
+                model.eval()
+                loss_regression_ls = []
+                loss_classification_ls = []
+                for idx_val, data in enumerate(val_generator):
+                    with torch.no_grad():
+                        imgs = data['img']
+                        annot = data['annot']
+
+                        if params.num_gpus == 1:
+                            imgs = imgs.cuda()
+                            annot = annot.cuda()
+
+                        cls_loss, reg_loss = model(imgs, annot, 0 == idx_val % 50, obj_list=params.obj_list)
                         cls_loss = cls_loss.mean()
                         reg_loss = reg_loss.mean()
 
@@ -305,7 +479,7 @@ def train(opt):
                     best_loss = loss
                     best_epoch = epoch
 
-                    save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+                    save_checkpoint(model, os.path.join(opt.saved_path, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth'))
 
                 model.train()
                            
@@ -313,19 +487,26 @@ def train(opt):
                 if epoch - best_epoch > opt.es_patience > 0:
                     print('[Info] Stop training at epoch {}. The lowest loss achieved is {}'.format(epoch, best_loss))
                     break
+            '''                         
     except KeyboardInterrupt:
-        save_checkpoint(model, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth')
+        save_checkpoint(model, os.path.join(opt.saved_path, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth'))
         writer.close()
     writer.close()
 
 
-def save_checkpoint(model, name):
+def save_checkpoint(model, path_checkpoint):
+    #print('name : ', name);
     if isinstance(model, CustomDataParallel):
-        torch.save(model.module.model.state_dict(), os.path.join(opt.saved_path, name))
+        #print('it is CustomDataParallel');  exit(0);
+        torch.save(model.module.model.state_dict(), path_checkpoint)
     else:
-        torch.save(model.model.state_dict(), os.path.join(opt.saved_path, name))
+        #print('it is NOT CustomDataParallel');  #exit(0);
+        #print('path_checkpoint : ', path_checkpoint)
+        torch.save(model.model.state_dict(), path_checkpoint)
+        #exit(0)
 
-
+#'''
 if __name__ == '__main__':
     opt = get_args()
     train(opt)
+#'''    

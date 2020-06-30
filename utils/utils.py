@@ -16,7 +16,8 @@ from utils.sync_batchnorm import SynchronizedBatchNorm2d
 
 from torch.nn.init import _calculate_fan_in_and_fan_out, _no_grad_normal_
 import math
-import webcolors
+import random
+#import webcolors
 
 def invert_affine(metas: Union[float, list, tuple], preds):
     for i in range(len(preds)):
@@ -147,7 +148,11 @@ def display(preds, imgs, obj_list, imshow=True, imwrite=False):
 
         if imwrite:
             os.makedirs('test/', exist_ok=True)
-            cv2.imwrite(f'test/{uuid.uuid4().hex}.jpg', imgs[i])
+            path_img_random = f'test/{uuid.uuid4().hex}.jpg'
+            print('path_img_random : ', path_img_random);
+            cv2.imwrite(path_img_random, imgs[i])
+            #exit(0);
+            #cv2.imwrite(f'test/{uuid.uuid4().hex}.jpg', imgs[i])
 
 
 def replace_w_sync_bn(m):
@@ -207,10 +212,12 @@ class CustomDataParallel(nn.DataParallel):
 
 def get_last_weights(weights_path):
     weights_path = glob(weights_path + f'/*.pth')
+    print('weights_path : ', weights_path); #exit(0);
     weights_path = sorted(weights_path,
                           key=lambda x: int(x.rsplit('_')[-1].rsplit('.')[0]),
                           reverse=True)[0]
     print(f'using weights {weights_path}')
+    #exit(0);
     return weights_path
 
 
@@ -302,5 +309,33 @@ def plot_one_box(img, coord, label=None, score=None, color=None, line_thickness=
         cv2.rectangle(img, c1, c2 , color, -1)  # filled
         cv2.putText(img, '{}: {:.0%}'.format(label, score), (c1[0],c1[1] - 2), 0, float(tl) / 3, [0, 0, 0], thickness=tf, lineType=cv2.FONT_HERSHEY_SIMPLEX)
 
-        
-color_list = standard_to_bgr(STANDARD_COLORS)
+      
+def genereate_random_color_list(n_class):
+    li_color_bgr = []
+    li_color_bgr.append((255, 0, 0))
+    li_color_bgr.append((0, 255, 0))
+    li_color_bgr.append((0, 0, 255))
+    if len(li_color_bgr) < n_class:
+        li_color_bgr.append((255, 255, 0))
+        li_color_bgr.append((255, 0, 255))
+        li_color_bgr.append((0, 255, 255))
+        if len(li_color_bgr) < n_class:
+            li_color_bgr.append((255, 128, 0))
+            li_color_bgr.append((255, 0, 128))
+            li_color_bgr.append((0, 255, 128))
+            if len(li_color_bgr) < n_class:
+                li_color_bgr.append((128, 255, 0))
+                li_color_bgr.append((128, 0, 255))
+                li_color_bgr.append((0, 128, 255))
+                if len(li_color_bgr) < n_class:
+                    li_color_bgr.append((128, 128, 0))
+                    li_color_bgr.append((128, 0, 128))
+                    li_color_bgr.append((0, 128, 128))
+                    if len(li_color_bgr) < n_class:
+                        more = n_class - len(li_color_bgr)                        
+                        t1 = [(random.randint(100, 255), random.randint(100, 255), random.randint(100, 255)) for k in range(more)]
+                        li_color_bgr += t1 
+    return li_color_bgr
+
+#color_list = standard_to_bgr(STANDARD_COLORS)
+color_list = genereate_random_color_list(len(STANDARD_COLORS))
