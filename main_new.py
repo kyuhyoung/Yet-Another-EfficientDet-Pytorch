@@ -45,6 +45,9 @@ from utils.utils import invert_affine, preprocess_video, postprocess
 
 model_dir = 'saved_model'
 
+def print_indented(n_sp, *args):
+    print('  ' * n_sp, *args)
+
 def make_folder(path) :
     try :
         os.mkdir(os.path.join(path))
@@ -112,65 +115,129 @@ def display(preds, imgs, obj_list):
         return imgs[i]
 
 
-def get_side_length_of_division(wid, nn, overlap_ratio):
-    return wid / (1.0 + nn * (1.0 - overlap_ratio))
+def get_side_length_of_division(wid, nn, overlap_ratio, n_sp):
+    print_indented(n_sp, 'get_side_length_of_division START')
+    print_indented(n_sp + 1, 'wid : ' + str(wid) + ', nn : ' + str(nn) + ', overlap_ratio : ' + str(overlap_ratio))
+    side_len = int(round(wid / (1.0 + nn * (1.0 - overlap_ratio))))
+    print_indented(n_sp + 1, 'side_len : ' + str(side_len))
+    #exit(0);
+    print_indented(n_sp, 'get_side_length_of_division END')
+    return side_len
 
 
-def get_interval(wid, ss, nn):
-    interval = 0
+def get_interval(wid, ss, nn, n_sp):
+    print_indented(n_sp, 'get_interval START')
+    print_indented(n_sp + 1, 'wid :', wid, ', ss :', ss, ', nn :', nn)
+    interval = int(0)
     if nn > 0:
         overlap_ratio = get_overlap_ratio(wid, ss, nn)
-        interval = (1.0 - overlap_ratio) * ss
+        interval = int(round((1.0 - overlap_ratio) * ss))
+        #interval = int(round((1.0 - overlap_ratio) * ss))
+    print_indented(n_sp + 1, 'interval : ' + str(interval))
+    #exit(0)
+    print_indented(n_sp, 'get_interval END')
     return interval
 
-def get_offset_list(wid, ss, nn):
-    overlap = get_overlap(wid, ss, nn)
-    interval = get_interval(wid, ss, nn)
-    print('overlap : ', overlap, ', interval : ', interval);   #exit()
+def get_offset_list(wid, ss, nn, n_sp):
+    print_indented(n_sp, 'get_offset_list START')
+    print_indented(n_sp + 1, 'wid : ' + str(wid) + ', ss : ' + str(ss) + ', nn : ' + str(nn))
+    interval = get_interval(wid, ss, nn, n_sp + 1)
+    overlap = ss - interval 
+    #t0 = get_overlap(wid, ss, nn, n_sp + 1);    print_indented(n_sp + 1, 't0 :', t0)
+    print_indented(n_sp + 1, 'overlap :', overlap, ', interval :', interval);   #exit()
     li = [0]
     while li[-1] + ss < wid:
         li.append(li[-1] + interval)
         dif = wid - (li[-1] + ss)
+        print_indented(n_sp + 2, 'dif : ' + str(dif) + ' / overlap : ' + str(overlap))
         if dif < overlap:
             li[-1] += dif
+    print_indented(n_sp + 1, 'li :', li)
+    #exit(0)
+    print_indented(n_sp, 'get_offset_list END')
     return li
 
 
 def get_overlap_ratio(wid, ss, nn):
     return 1.0 - (wid - ss) / (nn * ss)
 
-def get_overlap(wid, ss, nn):
-    overlap = -1
+#'''
+def get_overlap(wid, ss, nn, n_sp):
+    print_indented(n_sp, 'get_overlap START')
+    print_indented(n_sp + 1, 'wid : ' + str(wid) + ', ss : ' + str(ss) + ', nn : ' + str(nn)) #  exit()
+    overlap = int(-1)
     if nn > 0:
         overlap_ratio = get_overlap_ratio(wid, ss, nn)
-        print('overlap_ratio : ', overlap_ratio); #  exit()
-        overlap = overlap_ratio * ss;
+        print_indented(n_sp + 1, 'overlap_ratio : ' + str(overlap_ratio)) #  exit()
+        #overlap_f = overlap_ratio * ss; print_indented(n_sp + 1, 'overlap_f :', overlap_f);
+        overlap = int(round(overlap_ratio * ss))
+    print_indented(n_sp + 1, 'overlap : ' + str(overlap)) #  exit()
+    print_indented(n_sp, 'get_overlap END')
     return overlap
+#'''
 
-def get_num_of_division(wid, max_side, overlap_ratio):
-    print('wid : ', wid, ', max_side : ', max_side, ', overlap_ratio : ', overlap_ratio)
-    xx = max(wid, max_side)
+def get_num_and_side_length_of_division(wid, min_side, max_side, overlap_ratio, n_sp):
+    print_indented(n_sp, 'get_num_and_side_length_of_division START')
+    print_indented(n_sp + 1, 'wid : ' + str(wid) + ', min_side : ' + str(min_side) + ', max_side : ' + str(max_side) + ', overlap_ratio : ' + str(overlap_ratio))
     n_div = 0    #print
-    while xx > max_side:
-        n_div += 1
-        xx = get_side_length_of_division(wid, n_div, overlap_ratio)
-        print('n_div : ', n_div, ', xx : ', xx);    #print('')
-    return n_div
+    w_cur = wid;    w_pre = -1;
+    if w_cur > max_side:
+        while w_cur >= min_side:
+            w_pre = w_cur
+            n_div += 1
+            w_cur = get_side_length_of_division(wid, n_div, overlap_ratio, n_sp + 2)
+            print_indented(n_sp + 2, 'n_div : ' + str(n_div) + ', w_cur : ' + str(w_cur))
+        n_div -= 1
+    print_indented(n_sp + 1, 'n_div : ' + str(n_div) + ', w_pre : ' + str(w_pre))
+    #exit(0)
+    print_indented(n_sp, 'get_num_and_side_length_of_division END')
+    return n_div, w_pre
 
-def compute_offsets_4_mosaicking(min_side, min_overlap_ratio, wid, hei):
-    n_x = get_num_of_division(wid, min_side, min_overlap_ratio)
-    len_side_x = get_side_length_of_division(wid, n_x, min_overlap_ratio)
-    print('n_x b4 : ', n_x, ', len_side_x : ', len_side_x);    print('')
-    n_y = get_num_of_division(hei, min_side, min_overlap_ratio)
-    len_side_y = get_side_length_of_division(hei, n_y, min_overlap_ratio)
-    print('n_y b4 : ', n_y, ', len_side_y : ', len_side_y); #exit()
-    len_side = math.floor(max([len_side_x, len_side_y]))
-    n_x = get_num_of_division(wid, len_side, min_overlap_ratio)
-    n_y = get_num_of_division(hei, len_side, min_overlap_ratio)
-    li_offset_x = get_offset_list(wid, len_side, n_x)
-    li_offset_y = get_offset_list(hei, len_side, n_y)
-    t1 = np.floor(list(itertools.product(li_offset_x, li_offset_y)))
-    return t1, len_side
+def compute_offsets_4_mosaicking(min_side, max_side_ratio, min_overlap_ratio, wid, hei, n_sp):
+    print_indented(n_sp, 'compute_offsets_4_mosaicking START')
+    print_indented(n_sp + 1, 'min_side :', min_side, ', min_overlap_ratio :', min_overlap_ratio, ', wid :', wid, ', hei :', hei)
+    #   compute min_side_enough
+    max_side = min_side * max_side_ratio
+    print_indented(n_sp + 1, 'max_side : ' + str(max_side))
+    #   if both w and h is smaller than max_side
+    if wid <= max_side and hei <= max_side:
+        print_indented(n_sp + 1, "wid <= max_side and hei <= max_side")
+        li_offset_x = [0];    li_offset_y = [0];    len_side = -1; 
+    #   else if h is smaller than max_side
+    elif hei <= max_side:
+        print_indented(n_sp + 1, "hei <= max_side")
+        li_offset_y = [0];  
+        n_x, len_side_x = get_num_and_side_length_of_division(wid, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        #len_side_x = get_side_length_of_division(wid, n_x, min_overlap_ratio, n_sp + 1)
+        len_side = len_side_x
+        li_offset_x = get_offset_list(wid, len_side, n_x, n_sp + 2)
+    #   else if h is smaller than min_side_enough
+    elif wid <= max_side:
+        print_indented(n_sp + 1, "wid <= max_side")
+        li_offset_x = [0]
+        n_y, len_side_y = get_num_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        #len_side_y = get_side_length_of_division(hei, n_y, min_overlap_ratio, n_sp + 1)
+        len_side = len_side_y
+        li_offset_y = get_offset_list(hei, len_side, n_x, n_sp + 2)
+    #   else #  both w and h is larger than min_side_enough
+    else:
+        print_indented(n_sp + 1, "wid > max_side and hei > max_side")
+        n_x, len_side_x = get_num_and_side_length_of_division(wid, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        #len_side_x = get_side_length_of_division(wid, n_x, min_overlap_ratio, n_sp + 1)
+        print_indented(n_sp + 2, 'n_x b4 : ' + str(n_x) + ', len_side_x : ' + str(len_side_x))
+        n_y, len_side_y = get_num_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        #len_side_y = get_side_length_of_division(hei, n_y, min_overlap_ratio, n_sp + 1)
+        print_indented(n_sp + 2, 'n_y b4 : ' + str(n_y) + ', len_side_y : ' + str(len_side_y)) #exit()
+        len_side = math.floor(max([len_side_x, len_side_y]))
+        n_x = get_num_of_division(wid, len_side, min_overlap_ratio, n_sp + 2)
+        n_y = get_num_of_division(hei, len_side, min_overlap_ratio, n_sp + 2)
+        li_offset_x = get_offset_list(wid, len_side, n_x, n_sp + 2)
+        li_offset_y = get_offset_list(hei, len_side, n_y, n_sp + 2)
+    li_offset = np.floor(list(itertools.product(li_offset_x, li_offset_y)))
+    print_indented(n_sp + 1, 'li_offset :', li_offset);
+    print_indented(n_sp + 1, 'len_side :', len_side);  #exit(0);
+    print_indented(n_sp, 'compute_offsets_4_mosaicking END')
+    return li_offset, len_side
 
 
 def resize_and_pad_bottom_or_right(image, new_shape, bg_color):
@@ -220,7 +287,7 @@ def letterbox(img, new_shape=416, color=(127.5, 127.5, 127.5), mode='auto'):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, include_original, is_letterbox, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
+    def __init__(self, path, include_original, is_letterbox, max_side_ratio, n_sp, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
     #def __init__(self, path, img_size = 416):
         self.include_original = include_original
         self.no_disp = no_disp
@@ -230,6 +297,8 @@ class LoadImages:  # for inference
         self.min_divide_side = max([min_divide_side, img_size])
         self.height = img_size
         self.is_letterbox = is_letterbox
+        self.max_side_ratio = max_side_ratio
+        self.n_sp = n_sp
         img_formats = ['.jpg', '.jpeg', '.png', '.tif', '.bmp']
         vid_formats = ['.mov', '.avi', '.mp4']
         
@@ -289,7 +358,7 @@ class LoadImages:  # for inference
         if h_ori != self.h_ori or w_ori != self.w_ori:
             self.h_ori = h_ori; self.w_ori = w_ori;
             #print('self.min_divide_side : ', self.min_divide_side); exit()
-            self.li_offset_xy, self.len_side = compute_offsets_4_mosaicking(self.min_divide_side, self.              min_overlap_ratio, self.w_ori, self.h_ori)
+            self.li_offset_xy, self.len_side = compute_offsets_4_mosaicking(self.min_divide_side, self.max_side_ratio, self.min_overlap_ratio, self.w_ori, self.h_ori, self.n_sp + 1)
         li_im_rgb_chw = []
         for offset_xy in self.li_offset_xy:
             x_from, y_from = offset_xy
@@ -310,12 +379,13 @@ class LoadImages:  # for inference
             im_rgb_chw = np.ascontiguousarray(im_rgb_chw, dtype=np.float32)  # uint8 to float32
             im_rgb_chw /= 255.0  # 0 - 255 to 0.0 - 1.0
             li_im_rgb_chw.append(im_rgb_chw)
-        return path, li_im_rgb_chw, im0_bgr_hwc
+        return li_im_rgb_chw, path, im0_bgr_hwc
         
     def __len__(self):
         return self.nF  # number of files
 
-def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device, prediction_dir) :
+def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device, prediction_dir, n_sp):
+    print_indented(n_sp, 'test STRAT')
     class_name = {1 : 'bus', 2 : 'car', 3 :'carrier', 4 : 'cat', 5 : 'dog', 
                   6 : 'motorcycle', 7 : 'movable_signage', 8 : 'person', 9 : 'scooter', 10 : 'stroller', 
                   11 : 'truck', 12 : 'wheelchair', 13 : 'barricade', 14 : 'bench', 15 : 'chair',
@@ -324,7 +394,7 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                   25 : 'traffic_sign', 26 : 'tree_trunk', 27 : 'bollard', 28 : 'bicycle'}
     
     obj_list = list(class_name.values())
-    print('obj_list :', obj_list);  #exit(0);
+    print_indented(n_sp + 1, 'obj_list :', obj_list);  #exit(0);
     model.to(device)
     model.eval()
 
@@ -344,7 +414,7 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
     #batch_size = data_loader_test.batch_size
     #li_path_img = get_list_of_image_path_under_this_directory(dir_img)
     #n_img = len(li_path_img)
-    data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True) 
+    data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True, n_sp = n_sp + 1) 
     n_img = len(data_loader_test)
     for idx, data in enumerate(data_loader_test) :
     #for idx, path_img in enumerate(li_path_img) :
@@ -353,11 +423,11 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
         #    path_img = '/tf/notebooks/datasets/07_object_detection/val/ZED3_052263_L_P012028.png'
         if 0 == idx % 100:
             #print('idx : ', idx, ' / ', n_img, '\tpath_img : ', path_img)
-            print('idx : ', idx, ' / ', n_img)
+            print_indented(n_sp + 1, 'idx :', idx, ' /', n_img)
             start_time = time.time()
             if idx > 0:
                 fps = 100.0 / (time.time() - start_time)
-                print('fps : ', fps)
+                print_indented(n_sp + 1, 'fps :', fps)
                 start_time = time.time()
         '''
         img_name = get_exact_file_name_from_path(path_img)
@@ -378,11 +448,18 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             x = x.to(torch.float32).permute(0, 3, 1, 2)
             '''
             x = data
-            print('len(x) :', len(x));  #  exit(0)
-            print('type(x[0]) :', type(x[0]));  #  exit(0)
-            print('type(x[1]) :', type(x[1]));  #  exit(0)
-            print('type(x[2]) :', type(x[2]));  #  exit(0)
-            print('type(x) :', type(x));    exit(0)
+            print_indented(n_sp + 1, 'len(x) :', len(x));  #  exit(0)
+            print_indented(n_sp + 1, 'type(x[0]) :', type(x[0]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(x[1]) :', type(x[1]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(x[2]) :', type(x[2]));  #  exit(0)
+
+            print_indented(n_sp + 1, 'x[1] :', x[1]);  #  exit(0)
+            print_indented(n_sp + 1, 'len(x[0]) :', len(x[0]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(x[0][0]) :', type(x[0][0]));  #  exit(0)
+            print_indented(n_sp + 1, 'x[0][0].shape :', x[0][0].shape );  #  exit(0)
+            print_indented(n_sp + 1, 'x[2].shape :', x[2].shape);  #  exit(0)
+
+            print_indented(n_sp + 1, 'type(x) :', type(x));    exit(0)
             # model predict
             with torch.no_grad():
                 features, regression, classification, anchors = model(x)
@@ -495,6 +572,7 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
     pred_xml = elemTree.ElementTree(pred_xml)
     #pred_xml.write(prediction_dir + '/predictions.xml')
     pred_xml.write(path_prediction)
+    print_indented(n_sp, 'test END')
 
 def train_default(model, data_loader_train, data_loader_val, device, num_epochs, prediction_dir, print_iter, optimizer=None, lr_scheduler=None) :
     # 모델을 GPU나 CPU로 옮깁니다
@@ -644,6 +722,7 @@ def main():
     print('w_max : ', w_max, ', h_max : ', h_max, ',\t w_min : ', w_min, ', h_min : ', h_min)
     exit(0)
     '''
+    n_sp = 0
     #print('DATASET_PATH : ', DATASET_PATH); exit();
     # mode argument
     args = argparse.ArgumentParser()
@@ -837,7 +916,7 @@ def main():
         #test_generator = DataLoader(test_set, **test_params)
         #data_loader_test = dataloader.data_loader(DATASET_PATH, 1, config.xywh, phase='test')        
         #data_loader_test = dataloader.data_loader(DATASET_PATH, config.batch_size, config.xywh, phase='test')        
-        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.cuda, device, prediction_dir)
+        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.cuda, device, prediction_dir, n_sp + 1)
     print("That's it!")
 
 if __name__ == '__main__' :
