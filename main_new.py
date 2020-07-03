@@ -475,7 +475,11 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             #exit(0);
         
         if is_mosaic:
-            a = 0
+            out = postprocess_mosaic(x,
+                        anchors, regression, classification,
+                        regressBoxes, clipBoxes,
+                        threshold, iou_threshold)
+
         else:
             out = postprocess(x,
                         anchors, regression, classification,
