@@ -350,7 +350,9 @@ class LoadImages:  # for inference
             #img0 = cv2.imread(path)  # BGR
             im0_bgr_hwc = cv2.imread(path)  # BGR
             #assert img0 is not None, 'File Not Found ' + path
-            assert im0_bgr_hwc is not None, 'File Not Found ' + path
+            #assert im0_bgr_hwc is not None, 'File Not Found ' + path
+            if im0_bgr_hwc is None:
+                return None, None, None
             if not self.no_disp:
                 print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
                 
@@ -384,7 +386,7 @@ class LoadImages:  # for inference
     def __len__(self):
         return self.nF  # number of files
 
-def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device, prediction_dir, n_sp):
+def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device, prediction_dir, is_mosaic, n_sp):
     print_indented(n_sp, 'test STRAT')
     class_name = {1 : 'bus', 2 : 'car', 3 :'carrier', 4 : 'cat', 5 : 'dog', 
                   6 : 'motorcycle', 7 : 'movable_signage', 8 : 'person', 9 : 'scooter', 10 : 'stroller', 
@@ -412,9 +414,11 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
     pred_xml = elemTree.Element('predictions')
     pred_xml.text = '\n  '
     #batch_size = data_loader_test.batch_size
-    #li_path_img = get_list_of_image_path_under_this_directory(dir_img)
     #n_img = len(li_path_img)
-    data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True, n_sp = n_sp + 1) 
+    if is_mosaic:
+        data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True, n_sp = n_sp + 1) 
+    else:
+        data_loader_test = get_list_of_image_path_under_this_directory(dir_img)
     n_img = len(data_loader_test)
     for idx, data in enumerate(data_loader_test) :
     #for idx, path_img in enumerate(li_path_img) :
@@ -429,13 +433,12 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                 fps = 100.0 / (time.time() - start_time)
                 print_indented(n_sp + 1, 'fps :', fps)
                 start_time = time.time()
-        '''
-        img_name = get_exact_file_name_from_path(path_img)
-        im_bgr = cv2.imread(path_img)
-        if im_bgr is not None:
-        '''
-        if True:
-            '''
+        if not is_mosaic:
+            path_img = data
+            im_bgr = cv2.imread(path_img)
+            if im_bgr is None:
+                continue
+            img_name = get_exact_file_name_from_path(path_img)
             # frame preprocessing
             ori_imgs, framed_imgs, framed_metas = preprocess_video(im_bgr, max_size=input_size)
 
@@ -446,8 +449,10 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
 
             #x = x.to(torch.float32 if not use_float16 else torch.float16).permute(0, 3, 1, 2)
             x = x.to(torch.float32).permute(0, 3, 1, 2)
-            '''
+        else:     
             x = data
+            if x[0] is None:
+                continue
             print_indented(n_sp + 1, 'len(x) :', len(x));  #  exit(0)
             print_indented(n_sp + 1, 'type(x[0]) :', type(x[0]));  #  exit(0)
             print_indented(n_sp + 1, 'type(x[1]) :', type(x[1]));  #  exit(0)
@@ -459,43 +464,27 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             print_indented(n_sp + 1, 'x[0][0].shape :', x[0][0].shape );  #  exit(0)
             print_indented(n_sp + 1, 'x[2].shape :', x[2].shape);  #  exit(0)
 
-            print_indented(n_sp + 1, 'type(x) :', type(x));    exit(0)
-            # model predict
-            with torch.no_grad():
-                features, regression, classification, anchors = model(x)
-
-                out = postprocess(x,
+            print_indented(n_sp + 1, 'type(x) :', type(x));    #exit(0)
+            x = torch.from_numpy(np.stack(x[0])).to(device)
+        # model predict
+        with torch.no_grad():
+            #t0 = model(x)
+            #print_indented(n_sp + 1, 'type(t0) :', type(t0));   #exit(0)
+            #print_indented(n_sp + 1, 'len(t0) :', len(t0));   exit(0)
+            features, regression, classification, anchors = model(x)
+            #exit(0);
+        
+        if is_mosaic:
+            a = 0
+        else:
+            out = postprocess(x,
                         anchors, regression, classification,
                         regressBoxes, clipBoxes,
                         threshold, iou_threshold)
 
             # result
-            '''
-            print('type(out b4) : ', type(out));   #exit(0);
-            print('len(out b4) : ', len(out));   #exit(0);
-            print('type(out[0] b4) : ', type(out[0]));   #exit(0);
-            print('out[0] b4: ', out[0]);   #exit(0);
-            '''
             out = invert_affine(framed_metas, out)
-            '''
-            print('type(out after) : ', type(out));   #exit(0);
-            print('len(out after) : ', len(out));   #exit(0);
-            print('type(out[0] after) : ', type(out[0]));   #exit(0);
-            print('out[0] after: ', out[0]);   #exit(0);
-            '''
             boxes, labels, scores = out[0]['rois'], out[0]['class_ids'], out[0]['scores']
-            '''
-            print('type(boxes) :', type(boxes));
-            print('type(labels) :', type(labels));
-            print('boxes.shape :', boxes.shape);
-            '''
-            '''
-            if 0 == labels.size:
-                continue
-            if boxes.shape[0] < 2:
-                continue
-            '''      
-            #print('boxes[0, :] :', boxes[0, :]);
             '''
             img_show = display(out, ori_imgs, obj_list)
             # show frame by frame
@@ -506,30 +495,6 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                 cv2.imwrite('detected.jpg', img_show);
             #exit(0);
             '''
-            '''
-            print('type(data) : ', type(data)); #exit(0); 
-            print('len(data) : ', len(data)); #exit(0); 
-            print('type(data[0]) : ', type(data[0])); #exit(0); 
-            print('len(data[0]) : ', len(data[0])); #exit(0); 
-            print('type(data[0][0]) : ', type(data[0][0])); #exit(0);
-
-            print('type(data[1]) : ', type(data[1])); #exit(0); 
-            print('len(data[1]) : ', len(data[1])); #exit(0); 
-            print('type(data[1][0]) : ', type(data[1][0])); #exit(0); 
-            print('data[1][0] : ', data[1][0]); #exit(0); 
-
-            images, target = data
-            images = list(image.to(device) for image in images)
-            print('type(images[0]) : ', type(images[0]))
-            count = len(images)      
-            print('count : ', count);   exit(0)
-            outputs = model(images)
-            output = outputs[0]
-            boxes, labels, scores = output['boxes'], output['labels'], output['scores']
-            '''
-        else:
-            print('can NOT read. So skip : ', path_img)
-            boxes, labels, scores = np.array([]), np.array([]), np.array([])
         texts = []
         # 이미지 한장에 대하여
         #for n in range(count) :
@@ -775,6 +740,7 @@ def main():
     args.add_argument('--saved_path', type=str, default=model_dir)
     #parser.add_argument('--debug', type=boolean_string, default=False, help='whether visualize the predicted boxes of training, '
     args.add_argument('--debug', type=boolean_string, default=True, help='whether visualize the predicted boxes of training. The output images will be in test/')
+    args.add_argument('--is_mosaic', action='store_true', help='whether split the image into small overlaped sub-images to detect small objects.')
     args.add_argument('--xywh', type=boolean_string, default=False, help='whether bounding box representation is left-top-width-height or not.')
     '''
     for ii in range(100):
@@ -813,6 +779,8 @@ def main():
     model_name = config.model_name
     batch = config.batch_size
     mode = config.mode
+    is_mosaic = config.is_mosaic
+    #print('is_mosaic :', is_mosaic);    exit(0)
     prediction_dir = config.prediction_dir + "_" + mode
     #print('prediction_dir :', prediction_dir);  exit(0);
     print_iter = config.print_iter
@@ -916,7 +884,7 @@ def main():
         #test_generator = DataLoader(test_set, **test_params)
         #data_loader_test = dataloader.data_loader(DATASET_PATH, 1, config.xywh, phase='test')        
         #data_loader_test = dataloader.data_loader(DATASET_PATH, config.batch_size, config.xywh, phase='test')        
-        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.cuda, device, prediction_dir, n_sp + 1)
+        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.cuda, device, prediction_dir, is_mosaic, n_sp + 1)
     print("That's it!")
 
 if __name__ == '__main__' :
