@@ -127,11 +127,11 @@ def postprocess_mosaic(x, anchors, regression, classification, regressBoxes, cli
     transformed_anchors_xyxy = transformed_anchors_xyxy.cpu().numpy()
     print('type(transformed_anchors_xyxy) after) :', type(transformed_anchors_xyxy))
     print('transformed_anchors_xyxy.shape after:', transformed_anchors_xyxy.shape)
-    transformed_anchors_xyxy = np.reshape(transformed_anchors_xyxy, (np.prod(transformed_anchors_xyxy.shape[:-1]), transformed_anchors_xyxy.shape[-1]))
+    #transformed_anchors_xyxy = np.reshape(transformed_anchors_xyxy, (np.prod(transformed_anchors_xyxy.shape[:-1]), transformed_anchors_xyxy.shape[-1]))
     transformed_anchors_ltwh = xyxy_2_ltwh(transformed_anchors_xyxy)
     print('type(transformed_anchors_ltwh) :', type(transformed_anchors_ltwh))
     print('transformed_anchors_ltwh.shape :', transformed_anchors_ltwh.shape)
-    exit(0)
+    #exit(0)
     return 0
 
 def non_max_suppression(pred_xywh_c_cc_id, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included, conf_thres=0.5, nms_thres=0.5):
