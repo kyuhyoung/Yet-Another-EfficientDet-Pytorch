@@ -106,34 +106,14 @@ def xyxy_2_ltwh(xyxy):
         return (x1, y1, w, h)
     elif isinstance(xyxy, np.ndarray):
         # Multiple boxes given as a 2D ndarray
-        shape_ori = xyxy.shape
-        n_box = np.prod(shape_ori[:-1])
-        '''
-        print('xyxy[0, 10000, :] :', xyxy[0, 10000, :]);
-        print('xyxy[1, 20000, :] :', xyxy[1, 20000, :]);
-        print('xyxy[2, 30000, :] :', xyxy[2, 30000, :]);
-        '''
-        print('xyxy[10000, :] :', xyxy[10000, :]);
-        print('xyxy[50000, :] :', xyxy[50000, :]);
-        print('xyxy[90000, :] :', xyxy[90000, :]);
-
-
-        xyxy = np.reshape(xyxy, (n_box, shape_ori[-1]))  
-        t0 = np.hstack((xyxy[:, 0 : 2], xyxy[:, 2 : 4] - xyxy[:, 0 : 2] + 1))
-        t1 = np.reshape(t0, shape_ori)
-        print('t0.shape :', t0.shape)
-        print('t1.shape :', t1.shape);  #exit(0)
-        '''
-        print('t1[0, 10000, :] :', t1[0, 10000, :]);
-        print('t1[1, 20000, :] :', t1[1, 20000, :]);
-        print('t1[2, 30000, :] :', t1[2, 30000, :]);
-        '''
-        print('t1[10000, :] :', t1[10000, :]);
-        print('t1[50000, :] :', t1[50000, :]);
-        print('t1[90000, :] :', t1[90000, :]);
-
-        exit(0)
-        return np.hstack((xyxy[..., 0 : 2], xyxy[..., 2 : 4] - xyxy[..., 0 : 2] + 1))
+        if 2 < xyxy.ndim: 
+            shape_ori = xyxy.shape
+            n_box = np.prod(shape_ori[:-1])
+            xyxy = np.reshape(xyxy, (n_box, shape_ori[-1]))  
+            t0 = np.hstack((xyxy[:, 0 : 2], xyxy[:, 2 : 4] - xyxy[:, 0 : 2] + 1))
+            return np.reshape(t0, shape_ori)
+        else:        
+            return np.hstack((xyxy[..., 0 : 2], xyxy[..., 2 : 4] - xyxy[..., 0 : 2] + 1))
     else:
         raise TypeError('Argument xyxy must be a list, tuple, or numpy array.')
 
