@@ -87,10 +87,177 @@ def preprocess_video(*frame_from_video, max_size=512, mean=(0.406, 0.456, 0.485)
     framed_metas = [img_meta[1:] for img_meta in imgs_meta]
 
     return ori_imgs, framed_imgs, framed_metas
+'''
+def xyxy_2_ltwh(xyxy):
+    ltwh = xyxy
+    ltwh[..., 2] = xyxy[..., 2] - xyxy[..., 0]
+    ltwh[..., 3] = xyxy[..., 3] - xyxy[..., 1]
+    return ltwh
+'''
 
+def xyxy_2_ltwh(xyxy):
+    """Convert [x1 y1 x2 y2] box format to [x1 y1 w h] format."""
+    if isinstance(xyxy, (list, tuple)):
+        # Single box given as a list of coordinates
+        assert len(xyxy) == 4
+        x1, y1 = xyxy[0], xyxy[1]
+        w = xyxy[2] - x1 + 1
+        h = xyxy[3] - y1 + 1
+        return (x1, y1, w, h)
+    elif isinstance(xyxy, np.ndarray):
+        # Multiple boxes given as a 2D ndarray
+        shape_ori = xyxy.shape
+        n_box = np.prod(shape_ori[:-1])
+        '''
+        print('xyxy[0, 10000, :] :', xyxy[0, 10000, :]);
+        print('xyxy[1, 20000, :] :', xyxy[1, 20000, :]);
+        print('xyxy[2, 30000, :] :', xyxy[2, 30000, :]);
+        '''
+        print('xyxy[10000, :] :', xyxy[10000, :]);
+        print('xyxy[50000, :] :', xyxy[50000, :]);
+        print('xyxy[90000, :] :', xyxy[90000, :]);
+
+
+        xyxy = np.reshape(xyxy, (n_box, shape_ori[-1]))  
+        t0 = np.hstack((xyxy[:, 0 : 2], xyxy[:, 2 : 4] - xyxy[:, 0 : 2] + 1))
+        t1 = np.reshape(t0, shape_ori)
+        print('t0.shape :', t0.shape)
+        print('t1.shape :', t1.shape);  #exit(0)
+        '''
+        print('t1[0, 10000, :] :', t1[0, 10000, :]);
+        print('t1[1, 20000, :] :', t1[1, 20000, :]);
+        print('t1[2, 30000, :] :', t1[2, 30000, :]);
+        '''
+        print('t1[10000, :] :', t1[10000, :]);
+        print('t1[50000, :] :', t1[50000, :]);
+        print('t1[90000, :] :', t1[90000, :]);
+
+        exit(0)
+        return np.hstack((xyxy[..., 0 : 2], xyxy[..., 2 : 4] - xyxy[..., 0 : 2] + 1))
+    else:
+        raise TypeError('Argument xyxy must be a list, tuple, or numpy array.')
+
+
+
+def postprocess_mosaic(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold):
+    transformed_anchors_xyxy = regressBoxes(anchors, regression)
+    transformed_anchors_xyxy = clipBoxes(transformed_anchors_xyxy, x)
+    print('type(transformed_anchors_xyxy b4) :', type(transformed_anchors_xyxy))
+    print('transformed_anchors_xyxy.shape b4:', transformed_anchors_xyxy.shape)
+    transformed_anchors_xyxy = transformed_anchors_xyxy.cpu().numpy()
+    print('type(transformed_anchors_xyxy) after) :', type(transformed_anchors_xyxy))
+    print('transformed_anchors_xyxy.shape after:', transformed_anchors_xyxy.shape)
+    transformed_anchors_xyxy = np.reshape(transformed_anchors_xyxy, (np.prod(transformed_anchors_xyxy.shape[:-1]), transformed_anchors_xyxy.shape[-1]))
+    transformed_anchors_ltwh = xyxy_2_ltwh(transformed_anchors_xyxy)
+    print('type(transformed_anchors_ltwh) :', type(transformed_anchors_ltwh))
+    print('transformed_anchors_ltwh.shape :', transformed_anchors_ltwh.shape)
+    exit(0)
+    return 0
+
+def non_max_suppression(pred_xywh_c_cc_id, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included, conf_thres=0.5, nms_thres=0.5):
+    """
+    Removes detections with lower object confidence score than 'conf_thres'
+    Non-Maximum Suppression to further filter detections.
+    Returns detections with shape:
+    (x1, y1, x2, y2, object_conf, class_conf, class)
+    """
+    if 0 != li_offset_xy.size:
+        pred_xywh_c_cc_id = merge_divided_detections(pred_xywh_c_cc_id, li_offset_xy, include_original,              im_bgr_hwc_ori_np, ratio_resize)
+    min_wh = 2  # (pixels) minimum box width and height
+    output = [None] * len(pred_xywh_c_cc_id)
+    for image_i, xywh_c_cc_id in enumerate(pred_xywh_c_cc_id):
+        # Multiply conf by class conf to get combined confidence
+        class_conf, class_pred = xywh_c_cc_id[:, 5:].max(1)
+        xywh_c_cc_id[:, 4] *= class_conf
+        # Select only suitable predictions
+        i = (xywh_c_cc_id[:, 4] > conf_thres) & (xywh_c_cc_id[:, 2:4] > min_wh).all(1) & torch.                      isfinite(xywh_c_cc_id).all(1)
+        xywh_c_cc_id = xywh_c_cc_id[i]
+        # If none are remaining => process next image
+        if len(xywh_c_cc_id) == 0:
+            continue
+        # Select predicted classes
+        class_conf = class_conf[i]
+        class_pred = class_pred[i].unsqueeze(1).float()
+        # Box (center x, center y, width, height) to (x1, y1, x2, y2)
+        ltrb_c_cc_id = xywh_c_cc_id.clone()
+        ltrb_c_cc_id[:, :4] = xywh2xyxy(xywh_c_cc_id[:, :4])
+        # pred[:, 4] *= class_conf  # improves mAP from 0.549 to 0.551
+        # Detections ordered as (x1y1x2y2, obj_conf, class_conf, class_pred)
+        #pred = torch.cat((pred[:, :5], class_conf.unsqueeze(1), class_pred), 1)
+        ltrb_c_cc_id = torch.cat((ltrb_c_cc_id[:, :5], class_conf.unsqueeze(1), class_pred), 1)
+        # Get detections sorted by decreasing confidence scores
+        #pred = pred[(-pred[:, 4]).argsort()]
+        ltrb_c_cc_id = ltrb_c_cc_id[(-ltrb_c_cc_id[:, 4]).argsort()]
+        det_max = []
+        nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
+        for c in ltrb_c_cc_id[:, -1].unique():
+            dc = ltrb_c_cc_id[ltrb_c_cc_id[:, -1] == c]  # select class c
+            n = len(dc)
+            if n == 1:
+                det_max.append(dc)  # No NMS required if only 1 prediction
+                continue
+            elif n > 100:
+                dc = dc[:100]  # limit to first 100 boxes: https://github.com/ultralytics/yolov3/issues/117
+            # Non-maximum suppression
+            if nms_style == 'OR':  # default
+                while dc.shape[0]:
+                    det_max.append(dc[:1])  # save highest conf detection
+                    if len(dc) == 1:  # Stop if we're at the last detection
+                        break
+                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    dc = dc[1:][iou < nms_thres]  # remove ious > threshold
+            elif nms_style == 'AND':  # requires overlap, single boxes erased
+                while len(dc) > 1:
+                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    if iou.max() > 0.5:
+                        det_max.append(dc[:1])
+                    dc = dc[1:][iou < nms_thres]  # remove ious > threshold
+            elif nms_style == 'MERGE':  # weighted mixture box
+                while len(dc):
+                    if len(dc) == 1:
+                        det_max.append(dc)
+                        break
+                    i = bbox_iou(dc[0], dc) > nms_thres  # iou with other boxes
+                    weights = dc[i, 4:5]
+                    dc[0, :4] = (weights * dc[i, :4]).sum(0) / weights.sum()
+                    det_max.append(dc[:1])
+                    dc = dc[i == 0]
+            elif nms_style == 'SOFT':  # soft-NMS https://arxiv.org/abs/1704.04503
+                sigma = 0.5  # soft-nms sigma parameter
+                while len(dc):
+                    if len(dc) == 1:
+                        det_max.append(dc)
+                        break
+                    det_max.append(dc[:1])
+                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    dc = dc[1:]
+                    dc[:, 4] *= torch.exp(-iou ** 2 / sigma)  # decay confidences
+        if include_original:
+            det_max = compensate_division(det_max, li_group, li_str_class, too_included)
+        if len(det_max):
+            det_max = torch.cat(det_max)  # concatenate
+            output[image_i] = det_max[(-det_max[:, 4]).argsort()]  # sort
+    return output
 
 def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold):
+    print('type(anchors) :', type(anchors))
+    print('anchors.shape :', anchors.shape)
+    print('regression.shape :', regression.shape)
     transformed_anchors = regressBoxes(anchors, regression)
+    print('transformed_anchors.shape :', transformed_anchors.shape)
+    
+    '''
+    _, n_box, _ = transformed_anchors.shape
+    for iB in range(3):
+        print('\nanchors.cpu().numpy()[0, iB, :] :', anchors.cpu().numpy()[0, iB, :])
+        print('regression.cpu().numpy()[0, iB, :] :', regression.cpu().numpy()[0, iB, :])
+        print('transformed_anchors.cpu().numpy()[0, iB, :] :', transformed_anchors.cpu().numpy()[0, iB, :])
+    for iB in range(n_box - 3, n_box):
+        print('\nanchors.cpu().numpy()[0, iB, :] :', anchors.cpu().numpy()[0, iB, :])
+        print('regression.cpu().numpy()[0, iB, :] :', regression.cpu().numpy()[0, iB, :])
+        print('transformed_anchors.cpu().numpy()[0, iB, :] :', transformed_anchors.cpu().numpy()[0, iB, :])
+    exit(0)
+    '''
     transformed_anchors = clipBoxes(transformed_anchors, x)
     scores = torch.max(classification, dim=2, keepdim=True)[0]
     scores_over_thresh = (scores > threshold)[:, :, 0]

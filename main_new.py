@@ -23,7 +23,7 @@ import train_new
 from train_new import boolean_string, load_weight_from_file
 from efficientdet.utils import BBoxTransform, ClipBoxes
 from backbone import EfficientDetBackbone
-from utils.utils import invert_affine, preprocess_video, postprocess
+from utils.utils import invert_affine, preprocess_video, postprocess, postprocess_mosaic
 
 
 '''

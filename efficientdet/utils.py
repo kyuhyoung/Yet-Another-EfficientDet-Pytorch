@@ -2,7 +2,7 @@ import itertools
 import torch
 import torch.nn as nn
 import numpy as np
-
+import random
 
 class BBoxTransform(nn.Module):
     def forward(self, anchors, regression):
@@ -10,7 +10,7 @@ class BBoxTransform(nn.Module):
         decode_box_outputs adapted from https://github.com/google/automl/blob/master/efficientdet/anchors.py
 
         Args:
-            anchors: [batchsize, boxes, (y1, x1, y2, x2)]
+            anchors: [batchsize, boxes, (y1, x1, y2, x2)]   //  Not a normalized coordinates such as (0.23, 0.70) but real coordinates (in range of net input size such as between 0 and 512) of points such as (156, 510)
             regression: [batchsize, boxes, (dy, dx, dh, dw)]
 
         Returns:
@@ -27,6 +27,20 @@ class BBoxTransform(nn.Module):
         y_centers = regression[..., 0] * ha + y_centers_a
         x_centers = regression[..., 1] * wa + x_centers_a
 
+        '''
+        _, n_box = x_centers_a.shape
+        ioi = int(n_box * random.random())
+        print('n_box :', n_box);
+        for ioi in range(0, n_box, 10000):
+            print('\nioi :', ioi, ' /', n_box);
+            print('anchors[0, ioi, 1] :', anchors[0, ioi, 1], ', anchors[0, ioi, 3] :', anchors[0, ioi, 3])
+            print('x_centers_a[0, ioi] :', x_centers_a[0, ioi]);
+           print('wa[0, ioi] :', wa[0, ioi]);
+            print('w[0, ioi] :', w[0, ioi]);
+            print('x_centers[0, ioi] :', x_centers[0, ioi]);
+           print('regression[0, ioi, 1] :', regression[0, ioi, 1], ', regression[0, ioi, 3] :', regression[0, ioi, 3]);  
+        exit(0)
+        '''
         ymin = y_centers - h / 2.
         xmin = x_centers - w / 2.
         ymax = y_centers + h / 2.
