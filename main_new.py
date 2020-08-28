@@ -2,6 +2,7 @@ import dataloader
 import itertools
 import time
 import glob
+import copy
 from dataloader import CustomDataset, get_transform
 from efficientdet.dataset import get_exact_file_name_from_path, ChallengeDataset, Resizer, Normalizer, collater#, Augmenter, 
 from torch.utils.data import DataLoader
@@ -23,7 +24,7 @@ import train_new
 from train_new import boolean_string, load_weight_from_file
 from efficientdet.utils import BBoxTransform, ClipBoxes
 from backbone import EfficientDetBackbone
-from utils.utils import invert_affine, preprocess_video, postprocess, postprocess_mosaic
+from utils.utils import invert_affine, preprocess_video, postprocess#, postprocess_mosaic
 
 
 '''
@@ -202,7 +203,9 @@ def compute_offsets_4_mosaicking(min_side, max_side_ratio, min_overlap_ratio, wi
     #   if both w and h is smaller than max_side
     if wid <= max_side and hei <= max_side:
         print_indented(n_sp + 1, "wid <= max_side and hei <= max_side")
-        li_offset_x = [0];    li_offset_y = [0];    len_side = -1; 
+        li_offset_x = [0];    li_offset_y = [0];    
+        #len_side = -1; 
+        len_side = max(wid, hei); 
     #   else if h is smaller than max_side
     elif hei <= max_side:
         print_indented(n_sp + 1, "hei <= max_side")
@@ -262,6 +265,8 @@ def letterbox(img, new_shape=416, color=(127.5, 127.5, 127.5), mode='auto'):
     # Resize a rectangular image to a 32 pixel multiple rectangle
     # https://github.com/ultralytics/yolov3/issues/232
     shape = img.shape[:2]  # current shape [height, width]
+    print('shape : ', shape);   #exit();
+    print('new_shape : ', new_shape);   #exit();
     if isinstance(new_shape, int):
         ratio = float(new_shape) / max(shape)
     else:
@@ -269,6 +274,11 @@ def letterbox(img, new_shape=416, color=(127.5, 127.5, 127.5), mode='auto'):
     new_unpad = (int(round(shape[1] * ratio)), int(round(shape[0] * ratio)))
     # Compute padding https://github.com/ultralytics/yolov3/issues/232
     if mode is 'auto':  # minimum rectangle
+        print('new_unpad : ', new_unpad);   #exit();
+        tw = new_shape - new_unpad[0];  th = new_shape - new_unpad[1];
+        print('tw : ', tw, ', th : ', th);   #exit();
+        tw1 = np.mod(tw, 32);   th1 = np.mod(th, 32);
+        print('tw1 : ', tw1, ', th1 : ', th1);   exit();
         dw = np.mod(new_shape - new_unpad[0], 32) / 2  # width padding
         dh = np.mod(new_shape - new_unpad[1], 32) / 2  # height padding
     elif mode is 'square':  # square
@@ -287,13 +297,16 @@ def letterbox(img, new_shape=416, color=(127.5, 127.5, 127.5), mode='auto'):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, include_original, is_letterbox, max_side_ratio, n_sp, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
+    def __init__(self, path, include_original, is_letterbox, max_side_ratio, is_01, is_rgb, is_chw, n_sp, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
     #def __init__(self, path, img_size = 416):
         self.include_original = include_original
+        self.is_rgb = is_rgb
+        self.is_chw = is_chw
+        self.is_01 = is_01
         self.no_disp = no_disp
-        self.li_offset_xy = [];
         self.w_ori = -1;    self.h_ori = -1
-        self.min_overlap_ratio = min_overlap_ratio; self.li_offset_xy = []; self.len_side = -1
+        self.min_overlap_ratio = min_overlap_ratio; 
+        self.li_offset_xy = []; self.len_side = -1
         self.min_divide_side = max([min_divide_side, img_size])
         self.height = img_size
         self.is_letterbox = is_letterbox
@@ -304,16 +317,20 @@ class LoadImages:  # for inference
         
         files = []
         if os.path.isdir(path):
+            #print("It is a folder");
             files = sorted(glob.glob('%s/*.*' % path))
         elif os.path.isfile(path):
+            #print("It is a file");
             files = [path]
+        else:
+            print("This is neither a folder nor a file. What the hell is this")
+        #print("path", path);  print("files", files);  exit();     
         images = [x for x in files if os.path.splitext(x)[-1].lower() in img_formats]
         videos = [x for x in files if os.path.splitext(x)[-1].lower() in vid_formats]
         nI, nV = len(images), len(videos)
         self.files = images + videos
         self.nF = nI + nV  # number of files
         self.video_flag = [False] * nI + [True] * nV
-        self.mode = 'images'
         if any(videos):
             self.new_video(videos[0])  # new video
         else:
@@ -346,6 +363,7 @@ class LoadImages:  # for inference
             print('video %g/%g (%g/%g) %s: ' % (self.count + 1, self.nF, self.frame, self.nframes, path), end='')
         else:
             # Read image
+            self.mode = 'images'
             self.count += 1
             #img0 = cv2.imread(path)  # BGR
             im0_bgr_hwc = cv2.imread(path)  # BGR
@@ -361,27 +379,51 @@ class LoadImages:  # for inference
             self.h_ori = h_ori; self.w_ori = w_ori;
             #print('self.min_divide_side : ', self.min_divide_side); exit()
             self.li_offset_xy, self.len_side = compute_offsets_4_mosaicking(self.min_divide_side, self.max_side_ratio, self.min_overlap_ratio, self.w_ori, self.h_ori, self.n_sp + 1)
-        li_im_rgb_chw = []
+        #li_im_rgb_chw = []
+        li_im = []
+        print('self.len_side : ', self.len_side);
         for offset_xy in self.li_offset_xy:
             x_from, y_from = offset_xy
             x_to, y_to = min([x_from + self.len_side, self.w_ori]), min([y_from + self.len_side, self.h_ori]);
-            im_bgr_hwc, *_ = letterbox(im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)], new_shape      = self.height)
-            im_rgb_chw = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
-            im_rgb_chw = np.ascontiguousarray(im_rgb_chw, dtype=np.float32)  # uint8 to float32
-            im_rgb_chw /= 255.0  # 0 - 255 to 0.0 - 1.0
-            li_im_rgb_chw.append(im_rgb_chw)
-        if(self.include_original and len(li_im_rgb_chw) > 1):
+            #im_bgr_hwc, *_ = letterbox(im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)], new_shape = self.height, mode = 'square')
+            im_bgr_hwc = im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)]
+            '''
+            print('x_from  : ', x_from, ", x_to : ", x_to); print('y_from  : ', y_from, ", y_to : ", y_to);
+            print('x_to - x_from  : ', x_to - x_from, ", y_to - y_from : ", y_to - y_from);
+            print('im_bgr_hwc.shape : ', im_bgr_hwc.shape);   exit();
+            '''
+            if self.is_rgb and self.is_chw:
+                im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
+            elif self.is_rgb:
+                im = im_bgr_hwc[:, :, ::-1]
+            elif self.is_chw:
+                im = im_bgr_hwc.transpose(2, 0, 1)
+            else:
+                im = copy.deepcopy(im_bgr_hwc)
+            im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
+            if self.is_01:  
+                im /= 255.0  # 0 - 255 to 0.0 - 1.0
+            li_im.append(im)
+        if(self.include_original and len(li_im) > 1):
             if self.is_letterbox:
                 #print('is_letterbox TRUE'); exit(0);
                 im_bgr_hwc, *_ = letterbox(im0_bgr_hwc, new_shape = self.height, mode = 'square')
             else:
                 #print('is_letterbox FALSE'); exit(0);
                 im_bgr_hwc = resize_and_pad_bottom_or_right(im0_bgr_hwc, new_shape = self.height, bg_color = 127)
-            im_rgb_chw = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
-            im_rgb_chw = np.ascontiguousarray(im_rgb_chw, dtype=np.float32)  # uint8 to float32
-            im_rgb_chw /= 255.0  # 0 - 255 to 0.0 - 1.0
-            li_im_rgb_chw.append(im_rgb_chw)
-        return li_im_rgb_chw, path, im0_bgr_hwc
+            if self.is_rgb and self.is_chw:
+                im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
+            elif self.is_rgb:
+                im = im_bgr_hwc[:, :, ::-1]
+            elif self.is_chw:
+                im = im_bgr_hwc.transpose(2, 0, 1)
+            else:
+                im = copy.deepcopy(im_bgr_hwc)
+            im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
+            if self.is_01:
+                im /= 255.0  # 0 - 255 to 0.0 - 1.0
+            li_im.append(im)
+        return li_im, path, im0_bgr_hwc, self.li_offset_xy, self.len_side
         
     def __len__(self):
         return self.nF  # number of files
@@ -416,7 +458,7 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
     #batch_size = data_loader_test.batch_size
     #n_img = len(li_path_img)
     if is_mosaic:
-        data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True, n_sp = n_sp + 1) 
+        data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, is_01 = False, is_rgb = False, is_chw = False, n_sp = n_sp + 1, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True) 
     else:
         data_loader_test = get_list_of_image_path_under_this_directory(dir_img)
     n_img = len(data_loader_test)
@@ -433,39 +475,48 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                 fps = 100.0 / (time.time() - start_time)
                 print_indented(n_sp + 1, 'fps :', fps)
                 start_time = time.time()
-        if not is_mosaic:
+        
+        li_offset_xy = None;    include_original = None;    li_group = None;    im_bgr_hwc_ori_np = None;   ratio_resize = None;   li_str_class = None;    too_included = None;
+ 
+        if is_mosaic:     
+            #x = data
+            li_im_bgr, path_img, im_bgr_hwc_ori_np, li_offset_xy, len_side = data;   
+            if li_im_bgr is None:
+                continue
+            include_original = len(li_offset_xy) > len(li_im_bgr);  li_group = None;    ratio_resize = None;   li_str_class = None;    too_included = None;
+            '''
+            print_indented(n_sp + 1, 'len(data) :', len(x));  #  exit(0)
+            print_indented(n_sp + 1, 'type(data[0]) :', type(data[0]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(data[1]) :', type(data[1]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(data[2]) :', type(data[2]));  #  exit(0)
+
+            print_indented(n_sp + 1, 'data[1] :', data[1]);  #  exit(0)
+            print_indented(n_sp + 1, 'len(data[0]) :', len(data[0]));  #  exit(0)
+            print_indented(n_sp + 1, 'type(data[0][0]) :', type(data[0][0]));  #  exit(0)
+            print_indented(n_sp + 1, 'data[0][0].shape :', data[0][0].shape );  #  exit(0)
+            print_indented(n_sp + 1, 'data[2].shape :', data[2].shape);  #  exit(0)
+
+            print_indented(n_sp + 1, 'type(data) :', type(data));    #exit(0)
+            '''
+            #x = torch.from_numpy(np.stack(data[0])).to(device)
+        else:
             path_img = data
             im_bgr = cv2.imread(path_img)
             if im_bgr is None:
                 continue
-            img_name = get_exact_file_name_from_path(path_img)
+            li_im_bgr = [im_bgr];
+
+        img_name = get_exact_file_name_from_path(path_img)
             # frame preprocessing
-            ori_imgs, framed_imgs, framed_metas = preprocess_video(im_bgr, max_size=input_size)
+        ori_imgs, framed_imgs, framed_metas = preprocess_video(li_im_bgr, max_size=input_size)
+        print('len(li_im_bgr) :', len(li_im_bgr), '\nlen(ori_imgs) :', len(ori_imgs), '\nori_imgs[0].shape :', ori_imgs[0].shape, '\ntype(framed_imgs) :', type(framed_imgs), '\nlen(framed_imgs) :', len(framed_imgs), '\nframed_imgs[0].shape :', framed_imgs[0].shape, '\ntype(framed_metas) :', type(framed_metas), '\nlen(framed_metas) :', len(framed_metas), '\ntype(framed_metas[0]) :', type(framed_metas[0]), '\nlen(framed_metas[0]) :', len(framed_metas[0]), '\ntype(framed_metas[0][0]) :', type(framed_metas[0][0]), '\nframed_metas[0][0] :', framed_metas[0][0], '\nframed_metas[0][1] :', framed_metas[0][1], '\nframed_metas[0][2] :', framed_metas[0][2], '\nframed_metas[0][3] :', framed_metas[0][3], '\nframed_metas[0][4] :', framed_metas[0][4], '\nframed_metas[0][5] :', framed_metas[0][5]);    #exit();
+        if use_cuda:
+            x = torch.stack([torch.from_numpy(fi).cuda() for fi in framed_imgs], 0)
+        else:
+            x = torch.stack([torch.from_numpy(fi) for fi in framed_imgs], 0)
 
-            if use_cuda:
-                x = torch.stack([torch.from_numpy(fi).cuda() for fi in framed_imgs], 0)
-            else:
-                x = torch.stack([torch.from_numpy(fi) for fi in framed_imgs], 0)
-
-            #x = x.to(torch.float32 if not use_float16 else torch.float16).permute(0, 3, 1, 2)
-            x = x.to(torch.float32).permute(0, 3, 1, 2)
-        else:     
-            x = data
-            if x[0] is None:
-                continue
-            print_indented(n_sp + 1, 'len(x) :', len(x));  #  exit(0)
-            print_indented(n_sp + 1, 'type(x[0]) :', type(x[0]));  #  exit(0)
-            print_indented(n_sp + 1, 'type(x[1]) :', type(x[1]));  #  exit(0)
-            print_indented(n_sp + 1, 'type(x[2]) :', type(x[2]));  #  exit(0)
-
-            print_indented(n_sp + 1, 'x[1] :', x[1]);  #  exit(0)
-            print_indented(n_sp + 1, 'len(x[0]) :', len(x[0]));  #  exit(0)
-            print_indented(n_sp + 1, 'type(x[0][0]) :', type(x[0][0]));  #  exit(0)
-            print_indented(n_sp + 1, 'x[0][0].shape :', x[0][0].shape );  #  exit(0)
-            print_indented(n_sp + 1, 'x[2].shape :', x[2].shape);  #  exit(0)
-
-            print_indented(n_sp + 1, 'type(x) :', type(x));    #exit(0)
-            x = torch.from_numpy(np.stack(x[0])).to(device)
+        #x = x.to(torch.float32 if not use_float16 else torch.float16).permute(0, 3, 1, 2)
+        x = x.to(torch.float32).permute(0, 3, 1, 2)
         # model predict
         with torch.no_grad():
             #t0 = model(x)
@@ -474,17 +525,15 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             features, regression, classification, anchors = model(x)
             #exit(0);
         
-        if is_mosaic:
+        #if is_mosaic:
+        if 0:
             out = postprocess_mosaic(x,
                         anchors, regression, classification,
                         regressBoxes, clipBoxes,
                         threshold, iou_threshold)
 
         else:
-            out = postprocess(x,
-                        anchors, regression, classification,
-                        regressBoxes, clipBoxes,
-                        threshold, iou_threshold)
+            out = postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included)
 
             # result
             out = invert_affine(framed_metas, out)
@@ -628,8 +677,8 @@ try:
     #DATASET_PATH = nipa_data.get_data_root('deepfake')
     DATASET_PATH = nipa_data.get_data_root('object_detection')
 except:
-    DATASET_PATH = os.path.join('/tf/notebooks/datasets/07_object_detection')
-
+    #DATASET_PATH = os.path.join('/tf/notebooks/datasets/07_object_detection')
+    DATASET_PATH = "/home/kevin/data/coco/images"
 
 def get_list_of_file_path_under_1st_with_2nd_extension(direc, ext = ''):
     li_path_total = []

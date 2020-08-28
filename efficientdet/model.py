@@ -170,7 +170,7 @@ class BiFPN(nn.Module):
         # if same, pass;
         # elif earlier phase, downsample to target phase's by pooling
         # elif later phase, upsample to target phase's by nearest interpolation
-
+        
         if self.attention:
             p3_out, p4_out, p5_out, p6_out, p7_out = self._forward_fast_attention(inputs)
         else:
@@ -181,12 +181,15 @@ class BiFPN(nn.Module):
     def _forward_fast_attention(self, inputs):
         if self.first_time:
             p3, p4, p5 = inputs
-
+            print("p3.size() : ", p3.size());
+            print("p4.size() : ", p4.size());
+            print("p5.size() : ", p5.size());
             p6_in = self.p5_to_p6(p5)
             p7_in = self.p6_to_p7(p6_in)
 
             p3_in = self.p3_down_channel(p3)
             p4_in = self.p4_down_channel(p4)
+            print("p5.size() : ", p5.size());
             p5_in = self.p5_down_channel(p5)
 
         else:
@@ -205,6 +208,15 @@ class BiFPN(nn.Module):
         p5_w1 = self.p5_w1_relu(self.p5_w1)
         weight = p5_w1 / (torch.sum(p5_w1, dim=0) + self.epsilon)
         # Connections for P5_0 and P6_1 to P5_1 respectively
+        print("weight[0].size() : ", weight[0].size());
+        print("p5_in.size() : ", p5_in.size());
+        print("p6_up.size() : ", p6_up.size());
+        t1 = weight[0] * p5_in
+        t2 = self.p5_upsample(p6_up)
+        print("t1.size() : ", t1.size());
+        print("t2.size() : ", t2.size());
+        t3 = weight[1] * t2
+        t4 = t1 + t3
         p5_up = self.conv5_up(self.swish(weight[0] * p5_in + weight[1] * self.p5_upsample(p6_up)))
 
         # Weights for P4_0 and P5_1 to P4_1

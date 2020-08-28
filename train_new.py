@@ -13,7 +13,7 @@ from torchvision import transforms
 #from efficientdet.dataset import CocoDataset, Resizer, Normalizer, Augmenter, collater
 from efficientdet.dataset import ChallengeDataset, Resizer, Normalizer, Augmenter, collater
 from backbone import EfficientDetBackbone
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 import numpy as np
 from tqdm.autonotebook import tqdm
 
@@ -255,7 +255,7 @@ def train(opt, trainset_given = None, valset_given = None):
     else:
         use_sync_bn = False
 
-    writer = SummaryWriter(opt.log_path + f'/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}/')
+    #writer = SummaryWriter(opt.log_path + f'/{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}/')
 
     # warp the model with loss function, to reduce the memory usage on gpu0 and speedup
     model = ModelWithLoss(model, debug=opt.debug)
@@ -341,13 +341,13 @@ def train(opt, trainset_given = None, valset_given = None):
                         'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
                             step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
                             reg_loss.item(), loss.item()))
-                    writer.add_scalars('Loss', {'train': loss}, step)
-                    writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
-                    writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
+                    #writer.add_scalars('Loss', {'train': loss}, step)
+                    #writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
+                    #writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
 
                     # log learning_rate
                     current_lr = optimizer.param_groups[0]['lr']
-                    writer.add_scalar('learning_rate', current_lr, step)
+                    #writer.add_scalar('learning_rate', current_lr, step)
 
                     step += 1
                     #print('step : ', step);
@@ -406,9 +406,9 @@ def train(opt, trainset_given = None, valset_given = None):
                     print(
                         'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
                             epoch, opt.num_epochs, cls_loss, reg_loss, loss))
-                    writer.add_scalars('Loss', {'val': loss}, step)
-                    writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
-                    writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
+                    #writer.add_scalars('Loss', {'val': loss}, step)
+                    #writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
+                    #writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
 
                     if loss + opt.es_min_delta < best_loss:
                         best_loss = loss
@@ -459,9 +459,9 @@ def train(opt, trainset_given = None, valset_given = None):
                 print(
                     'Val. Epoch: {}/{}. Classification loss: {:1.5f}. Regression loss: {:1.5f}. Total loss: {:1.5f}'.format(
                         epoch, opt.num_epochs, cls_loss, reg_loss, loss))
-                writer.add_scalars('Loss', {'val': loss}, step)
-                writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
-                writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
+                #writer.add_scalars('Loss', {'val': loss}, step)
+                #writer.add_scalars('Regression_loss', {'val': reg_loss}, step)
+                #writer.add_scalars('Classfication_loss', {'val': cls_loss}, step)
 
                 if loss + opt.es_min_delta < best_loss:
                     best_loss = loss
@@ -478,8 +478,8 @@ def train(opt, trainset_given = None, valset_given = None):
             '''                         
     except KeyboardInterrupt:
         save_checkpoint(model, os.path.join(opt.saved_path, f'efficientdet-d{opt.compound_coef}_{epoch}_{step}.pth'))
-        writer.close()
-    writer.close()
+        #writer.close()
+    #writer.close()
 
 
 def save_checkpoint(model, path_checkpoint):
