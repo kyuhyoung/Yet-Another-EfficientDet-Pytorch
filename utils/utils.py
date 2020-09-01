@@ -452,7 +452,7 @@ def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes,
                     'scores': np.array(()),
                     })
 
-                return out
+    return out
 
 
 def display(preds, imgs, obj_list, imshow=True, imwrite=False):
