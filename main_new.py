@@ -24,7 +24,7 @@ import train_new
 from train_new import boolean_string, load_weight_from_file
 from efficientdet.utils import BBoxTransform, ClipBoxes
 from backbone import EfficientDetBackbone
-from utils.utils import invert_affine, preprocess_video, postprocess#, postprocess_mosaic
+from utils.utils import print_indented, invert_affine, preprocess_video, postprocess#, postprocess_mosaic
 
 
 '''
@@ -45,9 +45,6 @@ from utils.utils import invert_affine, preprocess_video, postprocess#, postproce
 '''
 
 model_dir = 'saved_model'
-
-def print_indented(n_sp, *args):
-    print('  ' * n_sp, *args)
 
 def make_folder(path) :
     try :
@@ -98,13 +95,17 @@ def get_list_of_image_path_under_this_directory(dir_img):
         li_fn_img = [fn for fn in li_fn_img if is_image_file(fn)]
     return sorted(li_fn_img)
 
+
 def display(preds, imgs, obj_list):
     for i in range(len(imgs)):
-        if len(preds[i]['rois']) == 0:
+        print('len(preds[i][rois_ltrb]) :', len(preds[i]['rois_ltrb']));    #exit()
+        if len(preds[i]['rois_ltrb']) == 0:
             return imgs[i]
 
-        for j in range(len(preds[i]['rois'])):
-            (x1, y1, x2, y2) = preds[i]['rois'][j].astype(np.int)
+        #print('imgs[i].shape b4 :', imgs[i].shape);    #exit()
+        for j in range(len(preds[i]['rois_ltrb'])):
+            (x1, y1, x2, y2) = preds[i]['rois_ltrb'][j].astype(np.int)
+            print('x1 :', x1, ', y1 :', y1, ', x2 :', x2, ', y2 :', y2)
             cv2.rectangle(imgs[i], (x1, y1), (x2, y2), (255, 255, 0), 2)
             obj = obj_list[preds[i]['class_ids'][j]]
             score = float(preds[i]['scores'][j])
@@ -113,7 +114,10 @@ def display(preds, imgs, obj_list):
                         (x1, y1 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                         (255, 255, 0), 1)
         
+        #print('imgs[i].shape after :', imgs[i].shape);    exit()
         return imgs[i]
+
+
 
 
 def get_side_length_of_division(wid, nn, overlap_ratio, n_sp):
@@ -194,6 +198,24 @@ def get_num_and_side_length_of_division(wid, min_side, max_side, overlap_ratio, 
     print_indented(n_sp, 'get_num_and_side_length_of_division END')
     return n_div, w_pre
 
+def get_num_of_division(wid, max_side, overlap_ratio, n_sp):
+    print_indented(n_sp, "get_num_of_division START")
+    print_indented(n_sp + 1, 'wid : ', wid, ', max_side : ', max_side, ', overlap_ratio : ', overlap_ratio)
+    xx = max(wid, max_side)
+    n_div = 0    #print
+    while xx > max_side:
+        n_div += 1
+        xx = get_side_length_of_division(wid, n_div, overlap_ratio, n_sp + 2)
+        print_indented(n_sp + 2, 'n_div : ', n_div, ', xx : ', xx);    #print('')
+    #print('xx b4 : ', xx, ' / ', min_side);    print('wid : ', wid);    print('nn : ', nn);
+    #if xx < wid: nn = max(1, nn - 1)
+    #print('xx after : ', xx, ' / ', min_side, ' / ', wid);       print('nn final : ', nn)
+    #exit()
+    #print('n_div final : ', n_div)
+    print_indented(n_sp, "get_num_of_division END")
+    return n_div
+
+
 def compute_offsets_4_mosaicking(min_side, max_side_ratio, min_overlap_ratio, wid, hei, n_sp):
     print_indented(n_sp, 'compute_offsets_4_mosaicking START')
     print_indented(n_sp + 1, 'min_side :', min_side, ', min_overlap_ratio :', min_overlap_ratio, ', wid :', wid, ', hei :', hei)
@@ -228,7 +250,7 @@ def compute_offsets_4_mosaicking(min_side, max_side_ratio, min_overlap_ratio, wi
         n_x, len_side_x = get_num_and_side_length_of_division(wid, min_side, max_side, min_overlap_ratio, n_sp + 2)
         #len_side_x = get_side_length_of_division(wid, n_x, min_overlap_ratio, n_sp + 1)
         print_indented(n_sp + 2, 'n_x b4 : ' + str(n_x) + ', len_side_x : ' + str(len_side_x))
-        n_y, len_side_y = get_num_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        n_y, len_side_y = get_num_and_side_length_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
         #len_side_y = get_side_length_of_division(hei, n_y, min_overlap_ratio, n_sp + 1)
         print_indented(n_sp + 2, 'n_y b4 : ' + str(n_y) + ', len_side_y : ' + str(len_side_y)) #exit()
         len_side = math.floor(max([len_side_x, len_side_y]))
@@ -297,9 +319,10 @@ def letterbox(img, new_shape=416, color=(127.5, 127.5, 127.5), mode='auto'):
 
 
 class LoadImages:  # for inference
-    def __init__(self, path, include_original, is_letterbox, max_side_ratio, is_01, is_rgb, is_chw, n_sp, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
+    def __init__(self, path, include_original, type_letterbox, max_side_ratio, is_01, is_rgb, is_chw, n_sp, min_divide_side = 608, min_overlap_ratio = 0.2, img_size = 416, no_disp = False):
     #def __init__(self, path, img_size = 416):
         self.include_original = include_original
+        self.is_current_frame_mosaic = False
         self.is_rgb = is_rgb
         self.is_chw = is_chw
         self.is_01 = is_01
@@ -309,7 +332,7 @@ class LoadImages:  # for inference
         self.li_offset_xy = []; self.len_side = -1
         self.min_divide_side = max([min_divide_side, img_size])
         self.height = img_size
-        self.is_letterbox = is_letterbox
+        self.type_letterbox = type_letterbox
         self.max_side_ratio = max_side_ratio
         self.n_sp = n_sp
         img_formats = ['.jpg', '.jpeg', '.png', '.tif', '.bmp']
@@ -374,61 +397,69 @@ class LoadImages:  # for inference
             if not self.no_disp:
                 print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
                 
-        h_ori, w_ori, _ = im0_bgr_hwc.shape
+        h_ori, w_ori = im0_bgr_hwc.shape[:2]
         if h_ori != self.h_ori or w_ori != self.w_ori:
             self.h_ori = h_ori; self.w_ori = w_ori;
             #print('self.min_divide_side : ', self.min_divide_side); exit()
             self.li_offset_xy, self.len_side = compute_offsets_4_mosaicking(self.min_divide_side, self.max_side_ratio, self.min_overlap_ratio, self.w_ori, self.h_ori, self.n_sp + 1)
+            self.is_current_frame_mosaic = len(self.li_offset_xy) > 1
         #li_im_rgb_chw = []
-        li_im = []
-        print('self.len_side : ', self.len_side);
-        for offset_xy in self.li_offset_xy:
-            x_from, y_from = offset_xy
-            x_to, y_to = min([x_from + self.len_side, self.w_ori]), min([y_from + self.len_side, self.h_ori]);
-            #im_bgr_hwc, *_ = letterbox(im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)], new_shape = self.height, mode = 'square')
-            im_bgr_hwc = im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)]
-            '''
-            print('x_from  : ', x_from, ", x_to : ", x_to); print('y_from  : ', y_from, ", y_to : ", y_to);
-            print('x_to - x_from  : ', x_to - x_from, ", y_to - y_from : ", y_to - y_from);
-            print('im_bgr_hwc.shape : ', im_bgr_hwc.shape);   exit();
-            '''
-            if self.is_rgb and self.is_chw:
-                im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
-            elif self.is_rgb:
-                im = im_bgr_hwc[:, :, ::-1]
-            elif self.is_chw:
-                im = im_bgr_hwc.transpose(2, 0, 1)
-            else:
-                im = copy.deepcopy(im_bgr_hwc)
-            im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
-            if self.is_01:  
-                im /= 255.0  # 0 - 255 to 0.0 - 1.0
-            li_im.append(im)
-        if(self.include_original and len(li_im) > 1):
-            if self.is_letterbox:
-                #print('is_letterbox TRUE'); exit(0);
-                im_bgr_hwc, *_ = letterbox(im0_bgr_hwc, new_shape = self.height, mode = 'square')
-            else:
-                #print('is_letterbox FALSE'); exit(0);
-                im_bgr_hwc = resize_and_pad_bottom_or_right(im0_bgr_hwc, new_shape = self.height, bg_color = 127)
-            if self.is_rgb and self.is_chw:
-                im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
-            elif self.is_rgb:
-                im = im_bgr_hwc[:, :, ::-1]
-            elif self.is_chw:
-                im = im_bgr_hwc.transpose(2, 0, 1)
-            else:
-                im = copy.deepcopy(im_bgr_hwc)
-            im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
-            if self.is_01:
-                im /= 255.0  # 0 - 255 to 0.0 - 1.0
-            li_im.append(im)
-        return li_im, path, im0_bgr_hwc, self.li_offset_xy, self.len_side
+        if self.is_current_frame_mosaic:
+            li_im = []
+            print_indented(self.n_sp + 1, 'self.len_side : ', self.len_side);
+            for offset_xy in self.li_offset_xy:
+                x_from, y_from = offset_xy
+                x_to, y_to = min([x_from + self.len_side, self.w_ori]), min([y_from + self.len_side, self.h_ori]);
+                #im_bgr_hwc, *_ = letterbox(im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)], new_shape = self.height, mode = 'square')
+                im_bgr_hwc = im0_bgr_hwc[int(y_from) : int(y_to), int(x_from) : int(x_to)]
+                '''
+                print('x_from  : ', x_from, ", x_to : ", x_to); print('y_from  : ', y_from, ", y_to : ", y_to);
+                print('x_to - x_from  : ', x_to - x_from, ", y_to - y_from : ", y_to - y_from);
+                print('im_bgr_hwc.shape : ', im_bgr_hwc.shape);   exit();
+                '''
+                if self.is_rgb and self.is_chw:
+                    im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
+                elif self.is_rgb:
+                    im = im_bgr_hwc[:, :, ::-1]
+                elif self.is_chw:
+                    im = im_bgr_hwc.transpose(2, 0, 1)
+                else:
+                    im = copy.deepcopy(im_bgr_hwc)
+                im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
+                if self.is_01:  
+                    im /= 255.0  # 0 - 255 to 0.0 - 1.0
+                li_im.append(im)
+            if(self.include_original and len(li_im) > 1):
+                if 'center' == self.type_letterbox:
+                    #print('is_letterbox TRUE'); exit(0);
+                    im_bgr_hwc, *_ = letterbox(im0_bgr_hwc, new_shape = self.height, mode = 'square')
+                elif 'top_left' == self.type_letterbox:
+                    #print('is_letterbox FALSE'); exit(0);
+                    im_bgr_hwc = resize_and_pad_bottom_or_right(im0_bgr_hwc, new_shape = self.height, bg_color = 127)
+                elif 'no_letterbox' == self.type_letterbox:
+                    im_bgr_hwc = im0_bgr_hwc.copy()
+                else:
+                    raise NameError('invalid letterbox type')
+                if self.is_rgb and self.is_chw:
+                    im = im_bgr_hwc[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB and then HWC to CHW
+                elif self.is_rgb:
+                    im = im_bgr_hwc[:, :, ::-1]
+                elif self.is_chw:
+                    im = im_bgr_hwc.transpose(2, 0, 1)
+                else:
+                    im = copy.deepcopy(im_bgr_hwc)
+                im = np.ascontiguousarray(im, dtype=np.float32)  # uint8 to float32
+                if self.is_01:
+                    im /= 255.0  # 0 - 255 to 0.0 - 1.0
+                li_im.append(im)
+            return self.is_current_frame_mosaic, li_im, path, im0_bgr_hwc, self.li_offset_xy, self.len_side
+        else:
+            return self.is_current_frame_mosaic, path, im0_bgr_hwc
         
     def __len__(self):
         return self.nF  # number of files
 
-def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device, prediction_dir, is_mosaic, n_sp):
+def test(model, dir_img, input_size, threshold, iou_threshold, ios_threshold, use_cuda, device, prediction_dir, shall_mosaic, letterbox_type, n_sp):
     print_indented(n_sp, 'test STRAT')
     class_name = {1 : 'bus', 2 : 'car', 3 :'carrier', 4 : 'cat', 5 : 'dog', 
                   6 : 'motorcycle', 7 : 'movable_signage', 8 : 'person', 9 : 'scooter', 10 : 'stroller', 
@@ -436,7 +467,8 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                   16 : 'fire_hydrant', 17 : 'kiosk', 18 : 'parking_meter', 19 : 'pole', 20 : 'potted_plant', 
                   21 : 'power_controller', 22 : 'stop', 23 : 'table', 24 : 'traffic_light_controller', 
                   25 : 'traffic_sign', 26 : 'tree_trunk', 27 : 'bollard', 28 : 'bicycle'}
-    
+    li_group = [['bus', 'car', 'truck'], ['carrier'], ['cat'], ['dog'], ['motorcycle'], ['movable_signage'], ['person'], ['scooter'], ['stroller'], ['wheelchair'], ['barricade'], ['bench'], ['chair'], ['fire_hydrant'], ['kiosk'], ['parking_meter'], ['pole'], ['potted_plant'], ['power_controller'], ['stop'], ['table'], ['traffic_light_controller'], ['traffic_sign'], ['tree_trunk'], ['bollard'], ['bicycle']]
+
     obj_list = list(class_name.values())
     print_indented(n_sp + 1, 'obj_list :', obj_list);  #exit(0);
     model.to(device)
@@ -457,8 +489,8 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
     pred_xml.text = '\n  '
     #batch_size = data_loader_test.batch_size
     #n_img = len(li_path_img)
-    if is_mosaic:
-        data_loader_test = LoadImages(dir_img, include_original = True, is_letterbox = False, max_side_ratio = 1.5, is_01 = False, is_rgb = False, is_chw = False, n_sp = n_sp + 1, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True) 
+    if shall_mosaic:
+        data_loader_test = LoadImages(dir_img, include_original = True, type_letterbox = 'no_letterbox', max_side_ratio = 1.5, is_01 = False, is_rgb = False, is_chw = False, n_sp = n_sp + 1, min_divide_side = 512, min_overlap_ratio = 0.2, img_size = 512, no_disp = True) 
     else:
         data_loader_test = get_list_of_image_path_under_this_directory(dir_img)
     n_img = len(data_loader_test)
@@ -476,14 +508,22 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
                 print_indented(n_sp + 1, 'fps :', fps)
                 start_time = time.time()
         
-        li_offset_xy = None;    include_original = None;    li_group = None;    im_bgr_hwc_ori_np = None;   ratio_resize = None;   li_str_class = None;    too_included = None;
- 
-        if is_mosaic:     
+        wh_tile = None; li_offset_xy = None;    include_original = None;    im_bgr_hwc_ori_np = None;
+        if shall_mosaic:
+            is_current_frame_mosaic = data[0]
+        else:      
+            is_current_frame_mosaic = False
+        if is_current_frame_mosaic:     
             #x = data
-            li_im_bgr, path_img, im_bgr_hwc_ori_np, li_offset_xy, len_side = data;   
+            li_im_bgr, path_img, im_bgr_hwc_ori_np, li_offset_xy, len_side = data[1:]   
             if li_im_bgr is None:
                 continue
-            include_original = len(li_offset_xy) > len(li_im_bgr);  li_group = None;    ratio_resize = None;   li_str_class = None;    too_included = None;
+            #print_indented(n_sp + 1, 'len(li_offset_xy) :', len(li_offset_xy));
+            #print_indented(n_sp + 1, 'len(li_im_bgr) ;', len(li_im_bgr));   exit();
+            include_original = len(li_offset_xy) < len(li_im_bgr);  
+            wh_ori = (im_bgr_hwc_ori_np.shape[1], im_bgr_hwc_ori_np.shape[0])
+            wh_tile = (li_im_bgr[0].shape[1], li_im_bgr[0].shape[0])
+            #print('wh_tile ;', wh_tile);    exit()
             '''
             print_indented(n_sp + 1, 'len(data) :', len(x));  #  exit(0)
             print_indented(n_sp + 1, 'type(data[0]) :', type(data[0]));  #  exit(0)
@@ -500,16 +540,36 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             '''
             #x = torch.from_numpy(np.stack(data[0])).to(device)
         else:
-            path_img = data
-            im_bgr = cv2.imread(path_img)
+            if shall_mosaic:
+                path_img, im_bgr = data[1:]
+            else:     
+                path_img = data; im_bgr = cv2.imread(path_img)
             if im_bgr is None:
                 continue
             li_im_bgr = [im_bgr];
-
+            wh_ori = (im_bgr.shape[1], im_bgr.shape[0])
+           
+        print_indented(n_sp + 1, 'path_img : ', path_img);  #  exit(0)
         img_name = get_exact_file_name_from_path(path_img)
             # frame preprocessing
-        ori_imgs, framed_imgs, framed_metas = preprocess_video(li_im_bgr, max_size=input_size)
-        print('len(li_im_bgr) :', len(li_im_bgr), '\nlen(ori_imgs) :', len(ori_imgs), '\nori_imgs[0].shape :', ori_imgs[0].shape, '\ntype(framed_imgs) :', type(framed_imgs), '\nlen(framed_imgs) :', len(framed_imgs), '\nframed_imgs[0].shape :', framed_imgs[0].shape, '\ntype(framed_metas) :', type(framed_metas), '\nlen(framed_metas) :', len(framed_metas), '\ntype(framed_metas[0]) :', type(framed_metas[0]), '\nlen(framed_metas[0]) :', len(framed_metas[0]), '\ntype(framed_metas[0][0]) :', type(framed_metas[0][0]), '\nframed_metas[0][0] :', framed_metas[0][0], '\nframed_metas[0][1] :', framed_metas[0][1], '\nframed_metas[0][2] :', framed_metas[0][2], '\nframed_metas[0][3] :', framed_metas[0][3], '\nframed_metas[0][4] :', framed_metas[0][4], '\nframed_metas[0][5] :', framed_metas[0][5]);    #exit();
+        ori_imgs, framed_imgs, framed_metas = preprocess_video(li_im_bgr, letterbox_type, n_sp + 1, max_size=input_size)
+        print_indented(n_sp + 2, 'len(li_im_bgr) :', len(li_im_bgr));
+        print_indented(n_sp + 2, 'len(ori_imgs) :', len(ori_imgs));
+        print_indented(n_sp + 2, 'ori_imgs[0].shape :', ori_imgs[0].shape);
+        print_indented(n_sp + 2, 'type(framed_imgs) :', type(framed_imgs));
+        print_indented(n_sp + 2, 'len(framed_imgs) :', len(framed_imgs));
+        print_indented(n_sp + 2, 'framed_imgs[0].shape :', framed_imgs[0].shape);
+        print_indented(n_sp + 2, 'type(framed_metas) :', type(framed_metas))
+        print_indented(n_sp + 2, 'len(framed_metas) :', len(framed_metas))
+        print_indented(n_sp + 2, 'type(framed_metas[0]) :', type(framed_metas[0]))
+        print_indented(n_sp + 2, 'len(framed_metas[0]) :', len(framed_metas[0]))
+        print_indented(n_sp + 2, 'type(framed_metas[0][0]) :', type(framed_metas[0][0]))
+        print_indented(n_sp + 2, 'framed_metas[0][0] :', framed_metas[0][0])
+        print_indented(n_sp + 2, 'framed_metas[0][1] :', framed_metas[0][1])
+        print_indented(n_sp + 2, 'framed_metas[0][2] :', framed_metas[0][2])
+        print_indented(n_sp + 2, 'framed_metas[0][3] :', framed_metas[0][3])
+        print_indented(n_sp + 2, 'framed_metas[0][4] :', framed_metas[0][4])
+        print_indented(n_sp + 2, 'framed_metas[0][5] :', framed_metas[0][5])    #exit();
         if use_cuda:
             x = torch.stack([torch.from_numpy(fi).cuda() for fi in framed_imgs], 0)
         else:
@@ -526,28 +586,35 @@ def test(model, dir_img, input_size, threshold, iou_threshold, use_cuda, device,
             #exit(0);
         
         #if is_mosaic:
-        if 0:
-            out = postprocess_mosaic(x,
-                        anchors, regression, classification,
-                        regressBoxes, clipBoxes,
-                        threshold, iou_threshold)
+        #print('threshold :', threshold);    exit()
+        out = postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp + 2, letterbox_type, wh_ori, wh_tile, li_offset_xy, include_original, li_group, obj_list)
 
-        else:
-            out = postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included)
 
-            # result
+        print_indented(n_sp + 2, 'len(ori_imgs) :', len(ori_imgs));   #exit()
+        print_indented(n_sp + 2, 'ori_imgs[0].shape :', ori_imgs[0].shape);   #exit()
+        print_indented(n_sp + 2, 'type(ori_imgs) :', type(ori_imgs));   #exit()
+        
+        if is_current_frame_mosaic:
+            img_show = display(out, [im_bgr_hwc_ori_np], obj_list)
+            cv2.imwrite('detected.jpg', img_show);
+            print_indented(n_sp + 3, 'mosaic detection saved') 
+        else:         
+        # result
             out = invert_affine(framed_metas, out)
-            boxes, labels, scores = out[0]['rois'], out[0]['class_ids'], out[0]['scores']
-            '''
+            boxes, labels, scores = out[0]['rois_ltrb'], out[0]['class_ids'], out[0]['scores']
+            #'''
+            print('len(ori_imgs) :', len(ori_imgs));    #exit()
+            print('ori_imgs[0].shape :', ori_imgs[0].shape);    #exit()
             img_show = display(out, ori_imgs, obj_list)
+            cv2.imwrite('detected.jpg', img_show);
+            print('img_show.shape :', img_show.shape);    exit()
             # show frame by frame
             #cv2.imwrite(img_name + '_detected.jpg', img_show);
         
             #if idx == n_img:
             #    cv2.imwrite('detected.jpg', img_show);
-                cv2.imwrite('detected.jpg', img_show);
-            #exit(0);
-            '''
+        exit(0);
+            #'''
         texts = []
         # 이미지 한장에 대하여
         #for n in range(count) :
@@ -678,7 +745,8 @@ try:
     DATASET_PATH = nipa_data.get_data_root('object_detection')
 except:
     #DATASET_PATH = os.path.join('/tf/notebooks/datasets/07_object_detection')
-    DATASET_PATH = "/home/kevin/data/coco/images"
+    #DATASET_PATH = "/home/kevin/data/coco/images"
+    DATASET_PATH = "/home/kevin/data/street_korea"
 
 def get_list_of_file_path_under_1st_with_2nd_extension(direc, ext = ''):
     li_path_total = []
@@ -769,7 +837,9 @@ def main():
     #parser.add_argument('--lr', type=float, default=1e-4)
     args.add_argument('--lr', type=float, default=1e-2)
     args.add_argument('--threshold', type=float, default=0.2)
+    args.add_argument('--ios_threshold', type=float, default=0.75)
     args.add_argument('--iou_threshold', type=float, default=0.2)
+    args.add_argument('--letterbox_type', type=str, default='center', help='type of letterbox. One of center, top_left,')
     args.add_argument('--optim', type=str, default='adamw', help='select optimizer for training, '
                                                                    'suggest using \'admaw\' until the'
                                                                    ' very final stage then switch to \'sgd\'')
@@ -865,7 +935,7 @@ def main():
         total_params = sum(p.numel() for p in model.parameters())
         print("num of parameter :", total_params)
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print("num of trainable_ parameter :", trainable_params)
+        print("num of trainable parameters :", trainable_params)
         print("------------------------------------------------------------")
         #exit(0);
 
@@ -902,7 +972,7 @@ def main():
         total_params = sum(p.numel() for p in model.parameters())
         print("num of parameter :", total_params)
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print("num of trainable_ parameter :", trainable_params)
+        print("num of trainable parameters :", trainable_params)
         print("------------------------------------------------------------")
         #exit(0);
 
@@ -937,7 +1007,7 @@ def main():
         #test_generator = DataLoader(test_set, **test_params)
         #data_loader_test = dataloader.data_loader(DATASET_PATH, 1, config.xywh, phase='test')        
         #data_loader_test = dataloader.data_loader(DATASET_PATH, config.batch_size, config.xywh, phase='test')        
-        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.cuda, device, prediction_dir, is_mosaic, n_sp + 1)
+        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.ios_threshold, config.cuda, device, prediction_dir, is_mosaic, config.letterbox_type, n_sp + 1)
     print("That's it!")
 
 if __name__ == '__main__' :

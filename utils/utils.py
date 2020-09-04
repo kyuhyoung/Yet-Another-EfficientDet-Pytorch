@@ -19,20 +19,69 @@ import math
 import random
 #import webcolors
 
+def print_indented(n_sp, *args):
+    if n_sp >= 0:
+        print('  ' * n_sp, *args)
+
+
+
 def invert_affine(metas: Union[float, list, tuple], preds):
+    #print('type(preds) :', type(preds));    exit()
+    print('len(preds) :', len(preds))   # exit()
     for i in range(len(preds)):
-        if len(preds[i]['rois']) == 0:
+        if len(preds[i]['rois_ltrb']) == 0:
             continue
         else:
             if metas is float:
-                preds[i]['rois'][:, [0, 2]] = preds[i]['rois'][:, [0, 2]] / metas
-                preds[i]['rois'][:, [1, 3]] = preds[i]['rois'][:, [1, 3]] / metas
+                preds[i]['rois_ltrb'][:, [0, 2]] = preds[i]['rois_ltrb'][:, [0, 2]] / metas
+                preds[i]['rois_ltrb'][:, [1, 3]] = preds[i]['rois_ltrb'][:, [1, 3]] / metas
             else:
+                #print('metas[i] :', metas[i]);  exit()
                 new_w, new_h, old_w, old_h, padding_w, padding_h = metas[i]
-                preds[i]['rois'][:, [0, 2]] = preds[i]['rois'][:, [0, 2]] / (new_w / old_w)
-                preds[i]['rois'][:, [1, 3]] = preds[i]['rois'][:, [1, 3]] / (new_h / old_h)
+                preds[i]['rois_ltrb'][:, [0, 2]] = (preds[i]['rois_ltrb'][:, [0, 2]] - padding_w) / (new_w / old_w)
+                preds[i]['rois_ltrb'][:, [1, 3]] = (preds[i]['rois_ltrb'][:, [1, 3]] - padding_h) / (new_h / old_h)
     return preds
 
+
+def letterboxing_opencv(image, wh_tgt, letterbox_type, n_sp, only_return_image = True, means = None, interpolation = None):
+    '''resize image with unchanged aspect ratio using padding'''
+    print_indented(n_sp, 'letterboxing_opencv START');
+    #iw, ih = image.shape[0:2][::-1]
+    is_color = len(image.shape) > 2
+    h_src, w_src = image.shape[:2]
+    w_tgt, h_tgt = wh_tgt
+    scale = min(w_tgt / w_src, h_tgt / h_src)
+    if abs(scale - 1.0) > 1e-5:  
+        w_new = int(w_src * scale); h_new = int(h_src * scale)
+        if interpolation:
+            image = cv2.resize(image, (w_new, h_new), interpolation = interpolation)
+        else:     
+            image = cv2.resize(image, (w_new, h_new), interpolation = cv2.INTER_CUBIC)
+    else:
+        w_new = w_src;  h_new = h_src;       
+    if 'top_left' == letterbox_type:
+        x_offset = 0;   y_offset = 0
+        x_padding = w_tgt - w_new;  y_padding = h_tgt - h_new;
+    elif 'center' == letterbox_type:
+        x_offset = (w_tgt - w_new) // 2;    y_offset = (h_tgt - h_new) // 2
+        x_padding = x_offset;               y_padding = y_offset;
+    else:
+        raise NameError('Invalid letterbox_type')        
+    if is_color:
+        chn = image.shape[2]
+        new_image = np.zeros((h_tgt, w_tgt, chn), np.float)
+    else:
+        new_image = np.zeros((h_tgt, w_tgt), np.float)
+        
+    if means:
+        #new_image.fill(128)
+        new_image[...] = means
+    #new_image[dy:dy+nh, dx:dx+nw,:] = image
+    new_image[y_offset : y_offset + h_new, x_offset : x_offset + w_new, :] = image
+    if only_return_image:
+        return new_image
+    else:
+        return new_image, w_new, h_new, w_src, h_src, x_offset, y_offset 
 
 def aspectaware_resize_padding(image, width, height, interpolation=None, means=None):
     old_h, old_w, c = image.shape
@@ -55,7 +104,7 @@ def aspectaware_resize_padding(image, width, height, interpolation=None, means=N
 
     padding_h = height - new_h
     padding_w = width - new_w
-
+    x_offset = 0;   y_offset = 0;
     if c > 1:
         canvas[:new_h, :new_w] = image
     else:
@@ -64,7 +113,8 @@ def aspectaware_resize_padding(image, width, height, interpolation=None, means=N
         else:
             canvas[:new_h, :new_w] = image
 
-    return canvas, new_w, new_h, old_w, old_h, padding_w, padding_h,
+    #return canvas, new_w, new_h, old_w, old_h, padding_w, padding_h
+    return canvas, new_w, new_h, old_w, old_h, x_offset, y_offset
 
 
 def preprocess(*image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
@@ -79,14 +129,32 @@ def preprocess(*image_path, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225
 
 
 #def preprocess_video(*frame_from_video, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
-def preprocess_video(ori_imgs, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
-    #ori_imgs = frame_from_video
+def preprocess_video(ori_imgs, letterbox_type, n_sp, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
+    
+    #for iI, ori_img in enumerate(ori_imgs):
+    #    print('iI :', iI, ' / ', len(ori_imgs), ', ori_img.shape :', ori_img.shape);
+    #exit()
+    ##  for non-mosaicking mode, original 1920 x 1080 image is just passed from frame capture of cv2.
+    ##   iI : 0 / 1 , ori_img.shape : (1080, 1920, 3) 
+    ##
+    ##  for mosaicking mode, original 1920 x 1080 image is divided into 8 tiles thru dataloader. Each tile is 600 x 600 and the last (9th) image is the whole 1920 x 1080 image.  
+    ##   iI : 0 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 1 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 2 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 3 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 4 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 5 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 6 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 7 / 9 , ori_img.shape : (600, 600, 3) 
+    ##   iI : 8 / 9 , ori_img.shape : (1080, 1920, 3) 
+    print_indented(n_sp, 'preprocess_video START')
     #print('type(ori_imgs[0]) :', type(ori_imgs[0]));  exit()
     normalized_imgs = [(img / 255 - mean) / std for img in ori_imgs]
-    imgs_meta = [aspectaware_resize_padding(img[..., ::-1], max_size, max_size,
-        means=None) for img in normalized_imgs]
+    #imgs_meta = [aspectaware_resize_padding(img[..., ::-1], max_size, max_size, means=None) for img in normalized_imgs]
+    imgs_meta = [letterboxing_opencv(img[..., ::-1], (max_size, max_size), letterbox_type, n_sp + 1, only_return_image = False) for img in normalized_imgs]
     framed_imgs = [img_meta[0] for img_meta in imgs_meta]
     framed_metas = [img_meta[1:] for img_meta in imgs_meta]
+    print_indented(n_sp, 'preprocess_video END')
 
     return ori_imgs, framed_imgs, framed_metas
 '''
@@ -120,7 +188,117 @@ def xyxy_2_ltwh(xyxy):
         raise TypeError('Argument xyxy must be a list, tuple, or numpy array.')
 
 
-def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_included, im_bgr_hwc_ori_np, ratio_resize, bbox_type):
+def scale_bbox(ltrb, gain, wh_src, wh_tgt, letterbox_type, bbox_type, n_sp):
+    print_indented(n_sp, 'scale_bbox START')
+    if 'center' == letterbox_type:
+        ltrb[:, 0] -= (wh_src[0] - wh_tgt[0] * gain) / 2  # x padding
+        ltrb[:, 1] -= (wh_src[1] - wh_tgt[1] * gain) / 2  # y padding
+        if 'ltrb' == bbox_type:
+            ltrb[:, 2] -= (wh_src[0] - wh_tgt[0] * gain) / 2  # x padding
+            ltrb[:, 3] -= (wh_src[1] - wh_tgt[1] * gain) / 2  # y padding
+    elif not('top_left' == letterbox_type):
+        raise NameError('invalid letterbox type')
+    ltrb[:, :4] /= gain
+    ltrb[:, [0, 2]] = ltrb[:, [0, 2]].clamp(min = 0, max = wh_tgt[0] - 1)
+    ltrb[:, [1, 3]] = ltrb[:, [1, 3]].clamp(min = 0, max = wh_tgt[1] - 1)
+    print_indented(n_sp, 'scale_bbox END')
+    return ltrb
+
+def letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_letterbox, wh_ori, letterbox_type, bbox_type, xy_offset, n_sp):
+    print_indented(n_sp, 'letterbox_bbox_2_ori_bbox START')
+    wh_src = wh_letterbox;  wh_tgt = wh_ori;
+    gain = min(wh_src[0] / wh_tgt[0], wh_src[1] / wh_tgt[1])
+    bbox_ori = scale_bbox(bbox_letterbox, gain, wh_src, wh_tgt, letterbox_type, bbox_type, n_sp + 1)
+    #bbox_ori[:, :2] += xy_offset[:] 
+    bbox_ori[:, 0] += xy_offset[0]; bbox_ori[:, 1] += xy_offset[1] 
+    if 'ltrb' == bbox_type:
+        #bbox_ori[:, 2:4] += xy_offset[:]; 
+        bbox_ori[:, 2] += xy_offset[0]; bbox_ori[:, 3] += xy_offset[1]; 
+    print_indented(n_sp, 'letterbox_bbox_2_ori_bbox END')
+    return bbox_ori
+
+def ori_bbox_2_letterbox_bbox(bbox_ori, wh_ori, wh_letterbox, letterbox_type, n_sp):
+    print_indented(n_sp, 'ori_bbox_2_letterbox_bbox START')
+    wh_src = wh_ori;    wh_tgt = wh_letterbox;
+    gain = max(wh_src[0] / wh_tgt[0], wh_src[1] / wh_tgt[1])
+    bbox_letterbox = scale_bbox_ltrb(bbox_ori, gain, wh_src, wh_tgt, letterbox_type, bbox_type, n_sp + 1)
+    print_indented(n_sp, 'ori_bbox_2_letterbox_bbox END')
+    return bbox_letterbox
+
+'''
+def ori_bbox_2_letterbox_bbox_ltrb(ltrb, wh_src, wh_tgt, letterbox_type) : #wh_img1, coords_xyxy, wh_img0):
+    # Rescale coords1 (xyxy) from img1_shape to img0_shape
+    #gain = max(wh_img1) / max(wh_img0)  # gain  = old / new
+    if 'top_left' == letterbox_type:
+        gain = max(wh_tgt[0] / wh_src[0], wh_tgt[1] / wh_src[1])
+        ltrb[:, :4] *= gain
+    elif 'center' == letterbox_type: 
+        gain = max(wh_src) / max(wh_tgt)  # gain  = old / new
+        #print('wh_img0 : ', wh_img0);     print('wh_img1 : ', wh_img1); #exit()
+    #coords_xyxy[:, [0, 2]] -= (wh_img1[0] - wh_img0[0] * gain) / 2  # x padding
+        ltrb[:, [0, 2]] -= (wh_src[0] - wh_tgt[0] * gain) / 2  # x padding
+        ltrb[:, [1, 3]] -= (wh_src[1] - wh_tgt[1] * gain) / 2  # y padding
+        ltrb[:, :4] /= gain
+        #ltrb[:, :4] = ltrb[:, :4].clamp(min = 0)
+    else:
+        raise NameError('invalid letterbox type')
+    ltrb[:, [0, 2]] = ltrb[:, [0, 2]].clamp(min = 0, max = wh_tgt[0] - 1)
+    ltrb[:, [1, 3]] = ltrb[:, [1, 3]].clamp(min = 0, max = wh_tgt[1] - 1)
+    return ltrb
+
+def ori_bbox_2_letterbox_bbox_ltwh(ltwh, wh_src, wh_tgt, letterbox_type):# wh_img1, coords_ltwh, wh_img0):
+    # Rescale coords1 (xyxy) from img1_shape to img0_shape
+    if 'top_left' == letterbox_type:
+        gain = max(wh_tgt[0] / wh_src[0], wh_tgt[1] / wh_src[1])
+        ltwh[:, :4] *= gain
+    elif 'center' == letterbox_type: 
+        gain = max(wh_src) / max(wh_tgt)  # gain  = old / new
+        ltwh[:, : 2] -= (wh_src - wh_tgt * gain) / 2  # x padding
+        #coords_ltwh[:, : 2] -= (wh_img1[0] - wh_img0[0] * gain) / 2  # x padding
+        #coords[:, :2] -= (img1_shape[1] - img0_shape[1] * gain) / 2  # x padding
+        #coords[:, 2:4] -= (img1_shape[0] - img0_shape[0] * gain) / 2  # y padding
+        ltwh[:, :4] /= gain
+        ltwh[:, :4] = ltwh[:, :4].clamp(min = 0)
+    else:
+        raise NameError('invalid letterbox type')
+    ltwh[:, [0, 2]] = ltwh[:, [0, 2]].clamp(min = 0, max = wh_tgt[0] - 1)
+    ltwh[:, [1, 3]] = ltwh[:, [1, 3]].clamp(min = 0, max = wh_tgt[1] - 1)
+
+    return ltwh
+
+#def letterbox_2_li_ltwh_ori(torch_tensor_det_xyxy_letterbox, wh_ori, wh_letterbox, wh_frame):
+#def letterboxing(bbox_ori, wh_ori, wh_letterbox, type_bbox_ori, type_bbox_letterbox, n_sp):
+#    return letterbox_bbox_2_ori_bbox(bbox_ori, wh_ori, wh_letterbox, type_bbox_ori, type_bbox_letterbox, (0, 0), n_sp) 
+
+def letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_letterbox, wh_ori, type_bbox_letterbox, type_bbox_ori, xy_offset_ori, letterbox_type, n_sp):
+    #li_ltwh_ori = []
+    #li_bbox_ori = []
+    #ltrbbbox_ori = bbox_letterbox.clone()
+    print_indented(n_sp, 'letterbox_bbox_2_ori_bbox START')
+    if 'ltwh' == type_bbox_letterbox:
+        ltrb_letterbox = ltwh_2_ltrb(bbox_letterbox)
+    elif 'xywh' == type_bbox_letterbox:
+        ltrb_letterbox = xywh_2_ltrb(bbox_letterbox)
+    else:
+        ltrb_letterbox = bbox_letterbox.copy()
+    ltrb_ori = scale_bbox_ltrb(ltrb_letterbox, wh_letterbox, wh_ori, letterbox_type)
+    for ii in range(2):
+        ltrb_ori[:, ii + 0] += xy_offset_ori[ii];  
+        ltrb_ori[:, ii + 2] += xy_offset_ori[ii];  
+    #ltrb_ori[:, [0, 2]] += xy_offset_ori[0];  
+    #ltrb_ori[:, [1, 3]] += xy_offset_ori[1];
+
+    if 'ltwh' == type_bbox_ori:
+        bbox_ori = ltrb_2_ltwh(ltrb_ori)
+    elif 'xywh' == type_bbox_ori:
+        bbox_ori = ltrb_2_xywh(ltrb_ori)
+    else:
+        bbox_ori = ltrb_ori.clone()
+    print_indented(n_sp, 'letterbox_bbox_2_ori_bbox END')
+    return bbox_ori
+'''
+
+def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_included, wh_letterbox, wh_tile, wh_ori, letterbox_type, bbox_type, n_sp):
     '''
     bbox_type : one of 'ltrb' / 'ltwh' / 'xywh'
          for image_i, pred in enumerate(li_det):
@@ -129,21 +307,30 @@ def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_in
                              '''
                                  #im_bgr_resized = cv2.resize(im_bgr_hwc_ori_np, None, fx = ratio_resize, fy = ratio_resize)
                                      
-    print('is_whole_included :', is_whole_included);  #exit()
-    print('li_offset_xy.shape :', li_offset_xy.shape);  #exit()
-    print('det_batch.shape :', det_batch.shape);  #exit()
+    print_indented(n_sp, 'merge_divided_detections START')
+    print_indented(n_sp + 1, 'is_whole_included :', is_whole_included);  #exit()
+    print_indented(n_sp + 1, 'li_offset_xy.shape :', li_offset_xy.shape);  #exit()
+    print_indented(n_sp + 1, 'type(li_offset_xy) :', type(li_offset_xy));  #exit()
+    print_indented(n_sp + 1, 'det_batch.shape :', det_batch.shape);  #exit()
+    print_indented(n_sp + 1, 'bbox_type :', bbox_type);  #exit()
+    #print_indented(n_sp + 1, 'type(im_bgr_hwc_ori_np) :', type(im_bgr_hwc_ori_np)); #exit()
     if isinstance(det_batch, torch.Tensor):
         li_offset_xy = torch.from_numpy(li_offset_xy).to(det_batch)
     for image_i, offset_xy in enumerate(li_offset_xy):
+        print_indented(n_sp + 2, 'image_i :', image_i, ' / ', len(li_offset_xy))
         #print('offset_xy.shape :', offset_xy.shape);     #exit()
-        #print('offset_xy b4 :', offset_xy);     #exit()
+        print_indented(n_sp + 3, 'offset_xy :', offset_xy);     #exit()
         #offset_xy[0] = 100; offset_xy[1] = 1000;
         #print('offset_xy after :', offset_xy);     #exit()
-        #print('det_batch[image_i, :, :2] b4 :', det_batch[image_i, :, :2])
-        det_batch[image_i, :, idx_bbox_from : idx_bbox_from + 2] += offset_xy[:]
-        if 'ltrb' == bbox_type:
-            det_batch[image_i, :, idx_bbox_from + 2 : idx_bbox_from + 4] += offset_xy[:]
-        #print('det_batch[image_i, :, :2] after :', det_batch[image_i, :, :2])
+        print_indented(n_sp + 3, 'det_batch[image_i, 1, :4] b4 :', det_batch[image_i, 1, :4])
+        det_batch[image_i, :, idx_bbox_from : idx_bbox_from + 4] = letterbox_bbox_2_ori_bbox(det_batch[image_i, :, idx_bbox_from : idx_bbox_from + 4], wh_letterbox, wh_tile, letterbox_type, bbox_type, offset_xy, n_sp + 3)
+        #det_batch[image_i, :, idx_bbox_from : idx_bbox_from + 2] += offset_xy[:]
+        #if 'ltrb' == bbox_type:
+        #    det_batch[image_i, :, idx_bbox_from + 2 : idx_bbox_from + 4] += offset_xy[:]
+        print_indented(n_sp + 3, 'det_batch[image_i, 1, :4] after :', det_batch[image_i, 1, :4])
+        print_indented(n_sp + 3, 'offset_xy :', offset_xy)
+        #if offset_xy[0] and offset_xy[1]:
+        #    exit()
         #print('AAA');   exit()
         #for xy in range(2):     
         #    det_batch[image_i, :, xy] += offset_xy[xy]
@@ -153,32 +340,17 @@ def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_in
                 for iR in range(len(ltrb)):
                     if li_det[image_i, iR, 4] < 0.6: continue
                     cv2.rectangle(im_bgr_resized, (ltrb[iR, 0], ltrb[iR, 1]), (ltrb[iR, 2], ltrb[iR, 3]), (0, 0, 255))  
-        '''         
+       '''         
+    #exit()
     if is_whole_included:
-        det_batch[-1, :, idx_bbox_from : idx_bbox_from + 4] /= ratio_resize
-        h_ori, w_ori, _ = im_bgr_hwc_ori_np.shape
-        #print('im_bgr_hwc_ori_np.shape : ', im_bgr_hwc_ori_np.shape) 
-        #print('ratio_resize : ', ratio_resize) 
-        if w_ori > h_ori:
-            margin_y = 0.5 * float(w_ori) * ratio_resize * (1.0 - float(h_ori) / float(w_ori))
-            #print('margin_y : ', margin_y); #exit()     
-            det_batch[-1, :, idx_bbox_from + 1] -= margin_y
-            if 'ltrb' == bbox_type:
-                det_batch[-1, :, idx_bbox_from + 3] -= margin_y
-        elif h_ori > w_ori:
-            margin_x = 0.5 * h_ori * ratio_resize * (1.0 - w_ori / h_ori)
-            #print('margin_x : ', margin_x); #exit()     
-            det_batch[-1, :, idx_bbox_from] -= margin_x
-            if 'ltrb' == bbox_type:
-                det_batch[-1, :, idx_bbox_from + 2] -= margin_x
-        '''
-        ltrb = xywh2xyxy(li_det[-1, :, :4])# / (ratio_resize)
-        for iR in range(len(ltrb)):
-            #if 0 != iR % 10: continue
-            if li_det[-1, iR, 4] < 0.6: continue
-            cv2.rectangle(im_bgr_resized, (ltrb[iR, 0], ltrb[iR, 1]), (ltrb[iR, 2], ltrb[iR, 3]), (255, 0, 0))  
-        cv2.imshow('im_bgr_resized', im_bgr_resized); cv2.waitKey(1); # exit()
-        '''
+        bbox_letterbox = det_batch[-1, :, idx_bbox_from : idx_bbox_from + 4]
+        #wh_ori = (im_bgr_hwc_ori_np.shape[1], im_bgr_hwc_ori_np.shape[0])
+        bbox_ori = letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_letterbox, wh_ori, letterbox_type, bbox_type, (0, 0), n_sp + 2)
+        print_indented(n_sp + 3, 'det_batch[-1, 1, :4] b4 :', det_batch[-1, 1, :4])
+        det_batch[-1, :, idx_bbox_from : idx_bbox_from + 4] = bbox_ori
+        print_indented(n_sp + 3, 'det_batch[-1, 1, :4] after :', det_batch[-1, 1, :4])
+        print_indented(n_sp + 3, 'det_batch[len(li_offset_xy) - 1, 1, :4] after :', det_batch[len(li_offset_xy) -1, 1, :4])
+    #exit()     
     n_batch, n_det, n_attribute = tuple(det_batch.size())
     n_det_total = n_batch * n_det;
     #print('n_batch : ', n_batch);   print('n_det : ', n_det);   print('n_attribute : ', n_attribute);   print('n_det_total : ', n_det_total);  #exit();
@@ -188,10 +360,144 @@ def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_in
     det_merged.unsqueeze_(0)
     return det_merged
                                                                                                                                                                                                                                                                                                                                                                                                                 
+def xywh_2_ltrb(xywh):          
+    ltrb = xywh.new(xywh.shape)
+    ltrb[..., 0] = xywh[..., 0] - xywh[..., 2] / 2.0
+    ltrb[..., 1] = xywh[..., 1] - xywh[..., 3] / 2.0
+    ltrb[..., 2] = xywh[..., 0] + xywh[..., 2] / 2.0
+    ltrb[..., 3] = xywh[..., 1] + xywh[..., 3] / 2.0
+    return ltrb
+
+
+def bbox_iou(box1, box2, bbox_type, n_sp):
+    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+    print_indented(n_sp, 'bbox_iou START')
+    #print_indented(n_sp + 1, 'box1.shape :', box1.shape);   #exit();
+    #print_indented(n_sp + 1, 'box2.shape :', box2.shape);   #exit();
+    ##   box1.shape : torch.Size([7])
+    ##   box2.shape : torch.Size([100, 7])
+    box2 = box2.t()
+    # Get the coordinates of bounding boxes
+    if 'ltrb' == bbox_type:
+        # x1, y1, x2, y2 = box1
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3]
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3]
+    elif 'xywh' == bbox_type:
+        # x, y, w, h = box1
+        b1_x1, b1_x2 = box1[0] - box1[2] / 2, box1[0] + box1[2] / 2
+        b1_y1, b1_y2 = box1[1] - box1[3] / 2, box1[1] + box1[3] / 2
+        b2_x1, b2_x2 = box2[0] - box2[2] / 2, box2[0] + box2[2] / 2
+        b2_y1, b2_y2 = box2[1] - box2[3] / 2, box2[1] + box2[3] / 2
+    elif 'ltwh' == bbox_type:
+        b1_x1, b1_y1 = box1[0], box1[1]
+        b1_x2 = b1_x1 + box1[2];    b1_y2 = b1_y1 + box1[3]
+        b2_x1, b2_y1 = box2[0], box2[1]
+        b2_x2 = b2_x1 + box2[2];    b2_y2 = b2_y1 + box2[3]
+    else:
+        raise NameError('invalid bbox_type')   
+    # Intersection area
+    inter_area = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+    #inter_area = (min(b1_x2, b2_x2) - max(b1_x1, b2_x1)).clamp(0) * (min(b1_y2, b2_y2) - max(b1_y1, b2_y1)).clamp(0)
+    #print_indented(n_sp + 1, 'inter_area.shape :', inter_area.shape);   #exit();
+    ##   inter_area.shape : torch.Size([100])
+    # Union Area
+    union_area = ((b1_x2 - b1_x1) * (b1_y2 - b1_y1) + 1e-16) + (b2_x2 - b2_x1) * (b2_y2 - b2_y1) - inter_area
+    print_indented(n_sp, 'bbox_iou END')
+    return inter_area / union_area  # iou
+
+
+def bbox_ios(box_self, box_other, bbox_type, n_sp):
+    #print('type(box1) : ', type(box1));     print('type(box2) : ', type(box2)); #exit()
+    #print('box1.shape : ', box1.shape);     print('box2.shape : ', box2.shape); #exit()
+    # Returns the intersecion over self_area of box_self wrt box_other. box_self is 4, box_other is nx4
+    print_indented(n_sp, 'bbox_ios START')
+    print_indented(n_sp + 1, 'box_self.shape :', box_self.shape);   #exit();
+    print_indented(n_sp + 1, 'box_other.shape :', box_other.shape);   #exit();
+    print_indented(n_sp + 1, 'bbox_type :', bbox_type);   #exit();
+
+    box_other = box_other.t()
+    # Get the coordinates of bounding boxes
+    if 'ltrb' == bbox_type:
+        # x1, y1, x2, y2 = box1
+        self_x1, self_y1, self_x2, self_y2 = box_self[0], box_self[1], box_self[2], box_self[3]
+        other_x1, other_y1, other_x2, other_y2 = box_other[0], box_other[1], box_other[2], box_other[3]
+    elif 'xywh' == bbox_type:
+        # x, y, w, h = box1
+        self_x1, self_x2 = box_self[0] - box_self[2] / 2, box_self[0] + box_self[2] / 2
+        self_y1, self_y2 = box_self[1] - box_self[3] / 2, box_self[1] + box_self[3] / 2
+        other_x1, other_x2 = box_other[0] - box_other[2] / 2, box_other[0] + box_other[2] / 2
+        other_y1, other_y2 = box_other[1] - box_other[3] / 2, box_other[1] + box_other[3] / 2
+    
+    elif 'ltwh' == bbox_type:
+        self_x1, self_y1 = box_self[0], box_self[1]
+        self_x2 = self_x1 + box_self[2];    self_y2 = self_y1 + box_self[3]
+        other_x1, other_y1 = box_other[0], box_other[1]
+        other_x2 = other_x1 + box_other[2]; other_y2 = other_y1 + box_other[3]
+    else:
+        raise NameError('invalid bbox_type')   
+   
+    # Intersection area
+    #inter_area = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+    inter_area = (min(self_x2, other_x2) - torch.max(self_x1, other_x1)).clamp(0) * (min(self_y2, other_y2) - max(self_y1, other_y1)).clamp(0)
+    print_indented(n_sp + 1, 'inter_area.shape :', inter_area.shape);   #exit();
+    # Self Area
+    self_area = (self_x2 - self_x1) * (self_y2 - self_y1) + 1e-16
+    print_indented(n_sp, 'bbox_ios END')
+    return inter_area / self_area  # ios
 
 
 
-def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included, bbox_type, conf_thres=0.5, nms_thres=0.5): #pred_letterbox.type() : torch.cuda.FloatTensor
+def compensate_division(li_ltrb_c_cc, li_group, li_str_class, ios_threshold, n_sp): # li_ltrb_c_cc : list of torch 2D       tensor
+    print_indented(n_sp, 'compensate_division START')
+    li_ltrb_c_cc_filtered = []
+    #for ii in range(len(li_ltrb_c_cc)):
+    #    print_indented(n_sp + 1, 'ii :', ii, ', li_ltrb_c_cc[ii].shape : ', li_ltrb_c_cc[ii].shape);
+    li_id = [int(lrtb_c_cc[0, -1]) for lrtb_c_cc in li_ltrb_c_cc]
+    li_id_unique = list(set(li_id))
+    li_id_very_unique = []
+    li_li_str_unique = []
+    for id_unique in li_id_unique:
+        str_cls = li_str_class[id_unique]
+        is_new = True
+        for li_str_unique in li_li_str_unique:
+            if str_cls in li_str_unique:
+                is_new = False; break;
+        if is_new:
+            li_id_very_unique.append(id_unique)
+            gr = [str_cls]
+            for group in li_group:
+                if str_cls in group:
+                    gr = group; break;
+            li_li_str_unique.append(gr)
+    for id_very_unique in li_id_very_unique:
+        str_cls = li_str_class[id_very_unique]
+        gr = [str_cls]
+        for group in li_group:
+            if str_cls in group:
+                gr = group; break;
+        li_ltrb_c_cc_same_cls = [ltrb_c_cc for ltrb_c_cc in li_ltrb_c_cc if li_str_class[int(ltrb_c_cc[0, -1])]      in gr]
+        if 1 >= len(li_ltrb_c_cc_same_cls):
+            li_ltrb_c_cc_filtered.append(li_ltrb_c_cc_same_cls[0]);   continue
+        for i0, ltrb_c_cc_same_cls_0 in enumerate(li_ltrb_c_cc_same_cls):
+            is_too_included = False
+            for i1, ltrb_c_cc_same_cls_1 in enumerate(li_ltrb_c_cc_same_cls):
+                print_indented(n_sp + 1, 'i1 :', i1, ' / ', len(li_ltrb_c_cc_same_cls))
+                if i1 == i0: continue
+                #ios = float(bbox_ios(torch.squeeze(ltrb_c_cc_same_cls_0), ltrb_c_cc_same_cls_1, 'ltrb', n_sp + 2))
+                ios = float(bbox_ios(torch.squeeze(ltrb_c_cc_same_cls_0), ltrb_c_cc_same_cls_1, 'ltrb', -100))
+                if ios > ios_threshold:
+                    is_too_included = True; break;
+            if not is_too_included:
+                li_ltrb_c_cc_filtered.append(ltrb_c_cc_same_cls_0)
+    print_indented(n_sp + 1, 'len(li_ltrb_c_cc) : ', len(li_ltrb_c_cc))
+    print_indented(n_sp + 1, 'len(li_ltrb_c_cc_filtered) : ', len(li_ltrb_c_cc_filtered));   #exit()
+    print_indented(n_sp, 'compensate_division END')
+    return li_ltrb_c_cc_filtered
+
+
+
+def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, n_sp, conf_thres=0.5, nms_thres=0.5): #pred_letterbox.type() : torch.cuda.FloatTensor
+
     """
     Input :
             bbox_type : one of 'ltrb' / 'ltwh' / 'xywh'
@@ -208,14 +514,18 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
                                                                 ##  pred_xywh_c_cc.shape : torch.Size([3, 5415, 85])
                                                                     
     #if 0 != li_offset_xy.size:
-    #print('pred_xywh_c_cc.shape b4 :', pred_xywh_c_cc.shape);  #exit();
+    #print('pred_xywh_c_cc.shape b4 :', pred_xywh_c_cc.shape);  exit();
+    #t0 = pred_xywh_c_cc[-1].unsqueeze(0);   print('t0.shape :', t0.shape);  exit();
+    #print_indented(n_sp, 'non_max_suppression_4_mosaic START')
     if li_offset_xy is not None and pred_xywh_c_cc.shape[0] > 1:
-        pred_xywh_c_cc = merge_divided_detections(pred_xywh_c_cc, 0, li_offset_xy, include_original, im_bgr_hwc_ori_np, ratio_resize, bbox_type) 
+        
+        #pred_xywh_c_cc = merge_divided_detections(pred_xywh_c_cc[-1].unsqueeze(0), 0, np.empty(shape=[0, 0]), include_original, wh_net_input, im_bgr_hwc_ori_np, letterbox_type, bbox_type, n_sp + 1) 
+        pred_xywh_c_cc = merge_divided_detections(pred_xywh_c_cc, 0, li_offset_xy, include_original, wh_net_input, wh_tile, wh_ori, letterbox_type, bbox_type, n_sp + 1) 
     #print('pred_xywh_c_cc.shape after :', pred_xywh_c_cc.shape);  exit();
     min_wh = 2  # (pixels) minimum box width and height
     output = [None] * len(pred_xywh_c_cc)
     for image_i, xywh_c_cc in enumerate(pred_xywh_c_cc):
-        #print('image_i : ', image_i)
+        print_indented(n_sp + 1, 'image_i :', image_i)
         # Experiment: Prior class size rejection
         # x, y, w, h = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
         # a = w * h  # area
@@ -245,26 +555,32 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
         ##  class_conf.shape : torch.Size([16245])
         ##  class_pred.shape : torch.Size([16245])
         
+        print_indented(n_sp + 2, 'xywh_c_cc[:, 4].max() b4 :', xywh_c_cc[:, 4].max());
         xywh_c_cc[:, 4] *= class_conf
+        print_indented(n_sp + 2, 'xywh_c_cc[:, 4].max() after :', xywh_c_cc[:, 4].max());
+        print_indented(n_sp + 2, 'conf_thres :', conf_thres);
         
         # Select only suitable predictions
         i = (xywh_c_cc[:, 4] > conf_thres) & (xywh_c_cc[:, 2:4] > min_wh).all(1) & torch.isfinite(xywh_c_cc).all(1)
-        print('xywh_c_cc[:, 4].max() :', xywh_c_cc[:, 4].max());
-        print('class_conf :', class_conf);
-        print('i :', i);   exit()
+        print_indented(n_sp + 2, 'class_conf :', class_conf);
+        print_indented(n_sp + 2, 'len(xywh_c_cc) b4 :', len(xywh_c_cc))
         xywh_c_cc = xywh_c_cc[i]
-        
+        print_indented(n_sp + 2, 'len(xywh_c_cc) after :', len(xywh_c_cc))
+        #exit()
         # If none are remaining => process next image
         if len(xywh_c_cc) == 0:
+            #print('None are remaining');    exit()
             continue
             
+        #print('Some are remaining');    exit()
         # Select predicted classes
         class_conf = class_conf[i]
         class_pred = class_pred[i].unsqueeze(1).float()
         
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         ltrb_c_cc = xywh_c_cc.clone()
-        ltrb_c_cc[:, :4] = xywh2xyxy(xywh_c_cc[:, :4])
+        #ltrb_c_cc[:, :4] = xywh2xyxy(xywh_c_cc[:, :4])
+        ltrb_c_cc[:, :4] = xywh_2_ltrb(xywh_c_cc[:, :4])
         # pred[:, 4] *= class_conf  # improves mAP from 0.549 to 0.551
         # Detections ordered as (x1y1x2y2, obj_conf, class_conf, class_pred)
         #pred = torch.cat((pred[:, :5], class_conf.unsqueeze(1), class_pred), 1)
@@ -293,7 +609,7 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
                 # while len(ind):
                 # j = ind[0]
                 # det_max.append(dc[j:j + 1])  # save highest conf detection
-                # reject = (bbox_iou(dc[j], dc[ind]) > nms_thres).nonzero()
+                # reject = (bbox_iou(dc[j], dc[ind], 'ltrb') > nms_thres).nonzero()
                 # [ind.pop(i) for i in reversed(reject)]
                 
                 # METHOD2
@@ -301,22 +617,23 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
                     det_max.append(dc[:1])  # save highest conf detection
                     if len(dc) == 1:  # Stop if we're at the last detection
                         break
-                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
                     dc = dc[1:][iou < nms_thres]  # remove ious > threshold
                     
             elif nms_style == 'AND':  # requires overlap, single boxes erased
                 while len(dc) > 1:
-                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
                     if iou.max() > 0.5:                            
                         det_max.append(dc[:1])
                     dc = dc[1:][iou < nms_thres]  # remove ious > threshold
                         
             elif nms_style == 'MERGE':  # weighted mixture box
+                #print('len(dc) :', len(dc));    exit();
                 while len(dc):
                     if len(dc) == 1:
                         det_max.append(dc)
                         break
-                    i = bbox_iou(dc[0], dc) > nms_thres  # iou with other boxes
+                    i = bbox_iou(dc[0], dc, 'ltrb', n_sp + 3) > nms_thres  # iou with other boxes
                     weights = dc[i, 4:5]
                     dc[0, :4] = (weights * dc[i, :4]).sum(0) / weights.sum()
                     det_max.append(dc[:1])
@@ -328,18 +645,23 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
                         det_max.append(dc)
                         break
                     det_max.append(dc[:1])
-                    iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes
+                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
                     dc = dc[1:]
                     dc[:, 4] *= torch.exp(-iou ** 2 / sigma)  # decay confidences
-                        
+        
+        print_indented(n_sp + 2, 'det_max[0].shape :', det_max[0].shape);   # exit();
+        print_indented(n_sp + 2, 'len(det_max) :', len(det_max));    #exit();
         if include_original:
-            det_max = compensate_division(det_max, li_group, li_str_class, too_included)
-            
-            
+            print_indented(n_sp + 3, 'len(det_max) b4 :', len(det_max));    #exit();
+            #print_indented(n_sp + 3, 'ios_threshold :', ios_threshold);    exit();
+            det_max = compensate_division(det_max, li_group, li_str_class, ios_threshold, n_sp + 3)
+            print_indented(n_sp + 3, 'len(det_max) after :', len(det_max));    #exit();
         if len(det_max):
             det_max = torch.cat(det_max)  # concatenate
             output[image_i] = det_max[(-det_max[:, 4]).argsort()]  # sort
     #exit()
+
+    print_indented(n_sp, 'non_max_suppression_4_mosaic END')
     return output
 
 
@@ -353,28 +675,41 @@ def ltrb_2_xywh(ltrb):
     return xywh
 
 
-def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, li_offset_xy = None, include_original = None, li_group = None, im_bgr_hwc_ori_np = None, ratio_resize = None, li_str_class = None, too_included = None):
+def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp, letterbox_type, wh_ori, wh_tile = None, li_offset_xy = None, include_original = None, li_group = None, li_str_class = None):
+    print_indented(n_sp, "postprocess START")
     is_mosaic = li_offset_xy is not None
-    print('x.shape :', x.shape, '\ntype(anchors) :', type(anchors), '\nanchors.shape :', anchors.shape, '\ntype(regression) :', type(regression), '\nregression.shape :', regression.shape, '\ntype(classification) :', type(classification), '\ntype(regressBoxes) : ', type(regressBoxes), '\ntype(clipBoxes) :', type(clipBoxes)); #exit(); 
+    batch_size, n_chn_input, h_input, w_input = x.shape
+    wh_net_input = (w_input, h_input);  
+    print_indented(n_sp + 1, 'wh_net_input :', wh_net_input);   #exit()
+    print_indented(n_sp + 1, 'x.shape :', x.shape)
+    print_indented(n_sp + 1, 'type(anchors_tlbr) :', type(anchors_tlbr))
+    print_indented(n_sp + 1, 'anchors.shape :', anchors_tlbr.shape)
+    print_indented(n_sp + 1, 'type(regression_yxhw) :', type(regression_yxhw))
+    print_indented(n_sp + 1, 'regression_yxhw.shape :', regression_yxhw.shape)
+    print_indented(n_sp + 1, 'type(classification) :', type(classification))
+    print_indented(n_sp + 1, 'type(regressBoxes) : ', type(regressBoxes))
+    print_indented(n_sp + 1, 'type(clipBoxes) :', type(clipBoxes)); #exit(); 
     # x.shape : torch.Size([1, 3, 512, 512])
     # anchor.shape : torch.Size(1, 49104, 4])
     # regressioin.shape : torch.Size(1, 49104, 4])
-    transformed_anchors = regressBoxes(anchors, regression)
-    transformed_anchors = clipBoxes(transformed_anchors, x)
+    transformed_anchors_ltrb = regressBoxes(anchors_tlbr, regression_yxhw)
+    transformed_anchors_ltrb = clipBoxes(transformed_anchors_ltrb, x)
     scores = torch.max(classification, dim=2, keepdim=True)[0]
-    scores_over_thresh = (scores > threshold)[:, :, 0]
-    print(' transformed_anchors.shape :', transformed_anchors.shape, '\n scores.shape :', scores.shape, '\n scores_over_thresh.shape :', scores_over_thresh.shape, '\n classification.shape :', classification.shape); #exit(); 
-    ##  transformed_anchors.shape : torch.Size([1, 49104, 4])
+    print_indented(n_sp + 1, 'transformed_anchors_ltrb.shape :', transformed_anchors_ltrb.shape)
+    print_indented(n_sp + 1, 'scores.shape :', scores.shape)
+    print_indented(n_sp + 1, 'classification.shape :', classification.shape); #exit(); 
+    ##  transformed_anchors_ltrb.shape : torch.Size([1, 49104, 4])
     ##  scores.shape : torch.Size(1, 49104, 1])
     ##  scores_over_thresh.shape : torch.Size(1, 49104])
-    ##  classification.shape : torch.Size(1, 49104, 28])
+    ##  classification.shape : torch.Size(1, 49104, 28])    #   28 classes for AI_challenge_2020
 
-    out = []
+    #out = []
+    li_di_ltrb_cls_score = []
     if is_mosaic:
-        xywh = ltrb_2_xywh(transformed_anchors)
+        xywh = ltrb_2_xywh(transformed_anchors_ltrb)
         bbox_type = 'xywh'
 
-        print('xywh.shape :', xywh.shape);
+        print_indented(n_sp + 1, 'xywh.shape :', xywh.shape);
         '''
         for iD in range(anchors.shape[1]):
             #if anchors[0, iD, 2] < 0:
@@ -385,12 +720,12 @@ def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes,
                 print('xywh[0, iD, :]', xywh[0, iD, :]);
         '''
 
-        #print('\nanchors[0, 49005, :] :', anchors[0, 49005, :]);   
-        #print('transformed_anchors[0, 49005, :] :', transformed_anchors[0, 49005, :]);   
+        #print('\nanchors_tlbr[0, 49005, :] :', anchors_tlbr[0, 49005, :]);   
+        #print('transformed_anchors_ltrb[0, 49005, :] :', transformed_anchors_ltrb[0, 49005, :]);   
         #print('xywh[0, 49005, :] :', xywh[0, 49005, :]);
         #print('scores[0, 49005, :] :', scores[0, 49005, :]);
         #print('scores.argmax() :', scores.argmax())
-        #print('scores.max() :', scores.max())
+        #print(/'scores.max() :', scores.max())
         #print('scores.min() :', scores.min())
         #print('threshold :', threshold)
         #print('scores[0, scores.argmax(), :] :', scores[0, scores.argmax(), :]);
@@ -398,8 +733,8 @@ def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes,
         #print('classification[0, 49005, :] :', classification[0, 49005, :]);
         #print('classification[0, scores.argmax(), :].sum() :', classification[0, scores.argmax(), :].sum());
         #print('classification[0, 49005, :].sum() :', classification[0, 49005, :].sum());
-        ##  anchors[0, 49005, :] : tensor([-64., -64., 448., 448.], device='cuda:0')
-        ##  transformed_anchors[0, 49005, :] : tensor([0.000, 0.000, 382.0305, 286.9348], device='cuda:0')
+        ##  anchors_tlbr[0, 49005, :] : tensor([-64., -64., 448., 448.], device='cuda:0')
+        ##  transformed_anchors_ltrb[0, 49005, :] : tensor([0.000, 0.000, 382.0305, 286.9348], device='cuda:0')
         ##  xywh[0, 49005, :] : tensor([191.0152, 143.4674 , 382.0305, 286.9348], device='cuda:0')
         ##  scores[0, 49005, :] : tensor([0.0002],  device='cuda:0')
         ##  scores.argmax() : tensor(19520, device='cuda:0')
@@ -415,44 +750,100 @@ def postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes,
         pred_xywh_c_cc = torch.cat([xywh, scores, classification], axis = 2)
         #print('pred_xywh_c_cc.shape :', pred_xywh_c_cc.shape);  exit()
         ##  pred_xywh_c_cc.shape : torch.Size([1, 49104, 33])   #   33 = 4 + 1 + 28
-        anchors_nms_idx = non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, im_bgr_hwc_ori_np, ratio_resize, li_str_class, too_included, bbox_type, threshold, iou_threshold);
+        #print_indented(n_sp + 1, 'type(im_bgr_hwc_ori_np) :', type(im_bgr_hwc_ori_np)); exit()
+        li_ltrb_c_cc = non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, n_sp + 1, threshold, iou_threshold);
+        #print('anchors_nms_idx.shape :', anchors_nms_idx.shape);   exit();
+        #print_indented(n_sp + 1, 'li_ltrb_c_cc[0].shape :', li_ltrb_c_cc[0].shape);   exit();
+        #   anchors_nms_idx[0].shape : torch.Size([6, 7])
+        print_indented(n_sp + 1, 'len(li_ltrb_c_cc) :', len(li_ltrb_c_cc));   #exit();
+        #   len(anchors_nms_idx) : 1
+        for ltrb_c_cc in li_ltrb_c_cc:
+            if 0 != ltrb_c_cc.shape[0]:
+                classification_per = ltrb_c_cc[:, 5 : ].permute(1, 0)
+                scores_, classes_ = classification_per.max(dim=0)
+                boxes_ltrb_ = ltrb_c_cc[:, : 4]
+                print_indented(n_sp + 2, 'classes_.shape 2 :', classes_.shape)
+                print_indented(n_sp + 2, 'scores_.shape 2 :', scores_.shape)
+                print_indented(n_sp + 2, 'boxes_ltrb_.shape :', boxes_ltrb_.shape);  #exit()
+                #   classes_.shape 2 : torch.Size([6])
+                #   scores_.shape 2 : torch.Size([6])
+                #   boxes_ltrb_.shape : torch.Size([6, 4])
+                li_di_ltrb_cls_score.append({
+                    'rois_ltrb': boxes_ltrb_.cpu().numpy(),
+                    'class_ids': classes_.cpu().numpy(),
+                    'scores': scores_.cpu().numpy(),
+                    })
+            else:
+
+                li_di_ltrb_cls_score.append({
+                    'rois_ltrb': np.array(()),
+                    'class_ids': np.array(()),
+                    'scores': np.array(()),
+                    })
 
     else:
+        scores_over_thresh = (scores > threshold)[:, :, 0]
+        print_indented(n_sp + 1, 'scores_over_thresh.shape :', scores_over_thresh.shape)
         for i in range(x.shape[0]):
             if scores_over_thresh[i].sum() == 0:
-                out.append({
-                    'rois': np.array(()),
+                li_di_ltrb_cls_score.append({
+                    'rois_ltrb': np.array(()),
                     'class_ids': np.array(()),
                     'scores': np.array(()),
                     })
                 continue
 
             classification_per = classification[i, scores_over_thresh[i, :], ...].permute(1, 0)
-            transformed_anchors_per = transformed_anchors[i, scores_over_thresh[i, :], ...]
+            transformed_anchors_ltrb_per = transformed_anchors_ltrb[i, scores_over_thresh[i, :], ...]
             scores_per = scores[i, scores_over_thresh[i, :], ...]
             scores_, classes_ = classification_per.max(dim=0)
-            print('transformed_anchors_per.shape :', transformed_anchors_per.shape, '\nscores_per[:, 0].shape :', scores_per[:, 0].shape, '\nclasses_.shape :', classes_.shape);   exit(); 
-
-            anchors_nms_idx = batched_nms(transformed_anchors_per, scores_per[:, 0], classes_, iou_threshold=iou_threshold)
-
+            print('classification_per.shape :', classification_per.shape, '\ntransformed_anchors_ltrb_per.shape :', transformed_anchors_ltrb_per.shape, '\nscores_per[:, 0].shape :', scores_per[:, 0].shape, '\nscores_.shape :', scores_.shape, '\nclasses_.shape :', classes_.shape);   #exit(); 
+            #   classification_per.shape : torch.Size([28, 2193])
+            #   transformed_anchors_ltrb_per.shape : torch.Size([2193, 4])
+            #   scores_per[:, 0].shape : torch.Size([2193])
+            #   scores_.shape : torch.Size([2193])
+            #   classes_.shape : torch.Size([2193])
+            anchors_nms_idx = batched_nms(transformed_anchors_ltrb_per, scores_per[:, 0], classes_, iou_threshold=iou_threshold)
+            print('anchors_nms_idx.shape :', anchors_nms_idx.shape);   #exit();
+            print('anchors_nms_idx :', anchors_nms_idx);   #exit();
+            #   anchors_nms_idx.shape : torch.Size([718])
             if anchors_nms_idx.shape[0] != 0:
                 classes_ = classes_[anchors_nms_idx]
                 scores_ = scores_[anchors_nms_idx]
-                boxes_ = transformed_anchors_per[anchors_nms_idx, :]
-
-                out.append({
-                    'rois': boxes_.cpu().numpy(),
+                boxes_ltrb_ = transformed_anchors_ltrb_per[anchors_nms_idx, :]
+                print('classes_.shape 2 :', classes_.shape, '\nscores_.shape 2 :', scores_.shape, '\nboxes_ltrb_.shape :', boxes_ltrb_.shape);  #exit()
+                #print('transformed_anchors_ltrb_per[10] :', transformed_anchors_ltrb_per[10]);  #exit()
+                #for iB in range(transformed_anchors_ltrb_per.shape[0]):
+                #    if 0 == iB % 10:
+                #        print('iB :', iB, ', transformed_anchors_ltrb_per[iB] :', transformed_anchors_ltrb_per[iB]);  #exit()
+                #exit()
+                #   classes_.shape 2 : torch.Size([718])
+                #   scores_.shape 2 : torch.Size([718])
+                #   boxes_ltrb_.shape : torch.Size([718, 4])
+                li_di_ltrb_cls_score.append({
+                    'rois_ltrb': boxes_ltrb_.cpu().numpy(),
                     'class_ids': classes_.cpu().numpy(),
                     'scores': scores_.cpu().numpy(),
                     })
             else    :
-                out.append({
-                    'rois': np.array(()),
+                li_di_ltrb_cls_score.append({
+                    'rois_ltrb': np.array(()),
                     'class_ids': np.array(()),
                     'scores': np.array(()),
                     })
 
-                return out
+    print_indented(n_sp, "postprocess END")
+    return li_di_ltrb_cls_score
+
+
+def display_just_box(ltrb, imgs):
+    for i in range(len(imgs)):
+        n_box = ltrb[i].shape[0]
+        for iB in range(n_box):
+            (x1, y1, x2, y2) = ltrb[iB, : 4].astype(np.int)
+            plot_one_box(imgs[i], [x1, y1, x2, y2])
+    return imgs
+
 
 
 def display(preds, imgs, obj_list, imshow=True, imwrite=False):
