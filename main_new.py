@@ -747,7 +747,9 @@ except:
     #DATASET_PATH = os.path.join('/tf/notebooks/datasets/07_object_detection')
     #DATASET_PATH = "/home/kevin/data/coco/images"
     #DATASET_PATH = "/home/kevin/data/street_korea"
-    DATASET_PATH = "/home/kevin/data/street_korea/MP_SEL_000098"
+    #DATASET_PATH = "/home/kevin/data/street_korea/MP_SEL_000098"
+    #DATASET_PATH = "/home/kevin/data/street_korea/NYC_14th"
+    DATASET_PATH = "/home/kevin/data/street_korea/rotterdam"
 
 def get_list_of_file_path_under_1st_with_2nd_extension(direc, ext = ''):
     li_path_total = []
