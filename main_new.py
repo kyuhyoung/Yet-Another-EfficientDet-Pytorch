@@ -240,10 +240,10 @@ def compute_offsets_4_mosaicking(min_side, max_side_ratio, min_overlap_ratio, wi
     elif wid <= max_side:
         print_indented(n_sp + 1, "wid <= max_side")
         li_offset_x = [0]
-        n_y, len_side_y = get_num_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
+        n_y, len_side_y = get_num_and_side_length_of_division(hei, min_side, max_side, min_overlap_ratio, n_sp + 2)
         #len_side_y = get_side_length_of_division(hei, n_y, min_overlap_ratio, n_sp + 1)
         len_side = len_side_y
-        li_offset_y = get_offset_list(hei, len_side, n_x, n_sp + 2)
+        li_offset_y = get_offset_list(hei, len_side, n_y, n_sp + 2)
     #   else #  both w and h is larger than min_side_enough
     else:
         print_indented(n_sp + 1, "wid > max_side and hei > max_side")
@@ -746,7 +746,8 @@ try:
 except:
     #DATASET_PATH = os.path.join('/tf/notebooks/datasets/07_object_detection')
     #DATASET_PATH = "/home/kevin/data/coco/images"
-    DATASET_PATH = "/home/kevin/data/street_korea"
+    #DATASET_PATH = "/home/kevin/data/street_korea"
+    DATASET_PATH = "/home/kevin/data/street_korea/MP_SEL_000098"
 
 def get_list_of_file_path_under_1st_with_2nd_extension(direc, ext = ''):
     li_path_total = []
