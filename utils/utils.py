@@ -316,6 +316,7 @@ def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_in
     #print_indented(n_sp + 1, 'type(im_bgr_hwc_ori_np) :', type(im_bgr_hwc_ori_np)); #exit()
     if isinstance(det_batch, torch.Tensor):
         li_offset_xy = torch.from_numpy(li_offset_xy).to(det_batch)
+    #'''
     for image_i, offset_xy in enumerate(li_offset_xy):
         print_indented(n_sp + 2, 'image_i :', image_i, ' / ', len(li_offset_xy))
         #print('offset_xy.shape :', offset_xy.shape);     #exit()
@@ -334,18 +335,27 @@ def merge_divided_detections(det_batch, idx_bbox_from, li_offset_xy, is_whole_in
         #print('AAA');   exit()
         #for xy in range(2):     
         #    det_batch[image_i, :, xy] += offset_xy[xy]
-        '''
-            if is_whole_included:
-                ltrb = xywh2xyxy(li_det[image_i, :, :4])
-                for iR in range(len(ltrb)):
-                    if li_det[image_i, iR, 4] < 0.6: continue
-                    cv2.rectangle(im_bgr_resized, (ltrb[iR, 0], ltrb[iR, 1]), (ltrb[iR, 2], ltrb[iR, 3]), (0, 0, 255))  
-       '''         
     #exit()
+    #'''
     if is_whole_included:
         bbox_letterbox = det_batch[-1, :, idx_bbox_from : idx_bbox_from + 4]
+        #print_indented(n_sp + 3, 'bbox_type :', bbox_type)
+        #print_indented(n_sp + 3, 'bbox_letterbox.shape :', bbox_letterbox.shape);   exit()
+        
         #wh_ori = (im_bgr_hwc_ori_np.shape[1], im_bgr_hwc_ori_np.shape[0])
         bbox_ori = letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_letterbox, wh_ori, letterbox_type, bbox_type, (0, 0), n_sp + 2)
+        
+        
+        iB = 0
+        for bbox in bbox_ori:
+            dx = abs(126 - bbox[0]);    dy = abs(1367 - bbox[1]);
+            if dx < 1 and dy < 1:
+                print_indented(n_sp + 4, 'iB :', iB, ', bbox :', bbox, ', objectness : ', det_batch[-1, iB, 4], ', class confidences :', det_batch[-1, iB, 5:])
+            iB += 1
+        print_indented(n_sp + 3, 'iB :', iB);   #exit()
+        
+        
+        
         print_indented(n_sp + 3, 'det_batch[-1, 1, :4] b4 :', det_batch[-1, 1, :4])
         det_batch[-1, :, idx_bbox_from : idx_bbox_from + 4] = bbox_ori
         print_indented(n_sp + 3, 'det_batch[-1, 1, :4] after :', det_batch[-1, 1, :4])
@@ -556,7 +566,7 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
         ##  class_pred.shape : torch.Size([16245])
         
         print_indented(n_sp + 2, 'xywh_c_cc[:, 4].max() b4 :', xywh_c_cc[:, 4].max());
-        xywh_c_cc[:, 4] *= class_conf
+        #xywh_c_cc[:, 4] *= class_conf
         print_indented(n_sp + 2, 'xywh_c_cc[:, 4].max() after :', xywh_c_cc[:, 4].max());
         print_indented(n_sp + 2, 'conf_thres :', conf_thres);
         
@@ -591,7 +601,8 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
         ltrb_c_cc = ltrb_c_cc[(-ltrb_c_cc[:, 4]).argsort()]
         
         det_max = []
-        nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
+        #nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
+        nms_style = 'OR'
         #for c in pred[:, -1].unique():
         for c in ltrb_c_cc[:, -1].unique():
             dc = ltrb_c_cc[ltrb_c_cc[:, -1] == c]  # select class c
@@ -782,6 +793,30 @@ def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, 
                     })
 
     else:
+        xywh = ltrb_2_xywh(transformed_anchors_ltrb);   bbox_type = 'xywh'
+        print_indented(n_sp + 1, 'xywh.shape :', xywh.shape);
+        pred_xywh_c_cc = torch.cat([xywh, scores, classification], axis = 2)
+      
+        print_indented(n_sp + 1, 'pred_xywh_c_cc.shape :', pred_xywh_c_cc.shape);
+        bbox_letterbox = pred_xywh_c_cc[0, :, : 4]
+        #print_indented(n_sp + 3, 'bbox_type :', bbox_type)
+        #print_indented(n_sp + 3, 'bbox_letterbox.shape :', bbox_letterbox.shape);   exit()
+        
+        #wh_ori = (im_bgr_hwc_ori_np.shape[1], im_bgr_hwc_ori_np.shape[0])
+        bbox_ori = letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_net_input, wh_ori, letterbox_type, bbox_type, (0, 0), n_sp + 2)
+        
+        
+        iB = 0
+        for bbox in bbox_ori:
+            dx = abs(126 - bbox[0]);    dy = abs(1367 - bbox[1]);
+            if dx < 5 and dy < 5 and pred_xywh_c_cc[0, iB, 4] > threshold:
+                print_indented(n_sp + 4, 'iB :', iB, ', bbox :', bbox, ', objectness : ', pred_xywh_c_cc[0, iB, 4], ', class confidences :', pred_xywh_c_cc[0, iB, 5:])
+            iB += 1
+        print_indented(n_sp + 3, 'iB :', iB);   #exit()
+        
+ 
+
+
         scores_over_thresh = (scores > threshold)[:, :, 0]
         print_indented(n_sp + 1, 'scores_over_thresh.shape :', scores_over_thresh.shape)
         for i in range(x.shape[0]):
@@ -793,16 +828,46 @@ def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, 
                     })
                 continue
 
+
             classification_per = classification[i, scores_over_thresh[i, :], ...].permute(1, 0)
             transformed_anchors_ltrb_per = transformed_anchors_ltrb[i, scores_over_thresh[i, :], ...]
             scores_per = scores[i, scores_over_thresh[i, :], ...]
             scores_, classes_ = classification_per.max(dim=0)
+            
+            '''
+            xywh = ltrb_2_xywh(transformed_anchors_ltrb_per);   bbox_type = 'xywh'
+            #print('xywh.shape :', xywh.shape);
+            #print('scores_per.shape :', scores_per.shape);
+            #print('classification_per.shape :', classification_per.shape);  exit()
+            pred_xywh_c_cc = torch.cat([xywh, scores_per, classification_per.permute(1, 0)], axis = 1)
+      
+            bbox_letterbox = pred_xywh_c_cc[:, : 4]
+       
+            bbox_ori = letterbox_bbox_2_ori_bbox(bbox_letterbox, wh_net_input, wh_ori, letterbox_type, bbox_type, (0, 0), n_sp + 2)
+            iB = 0
+            for bbox in bbox_ori:
+                dx = abs(126 - bbox[0]);    dy = abs(1367 - bbox[1]);
+                #if dx < 5 and dy < 5:
+                if dx < 5 and dy < 5 and pred_xywh_c_cc[iB, 4] > threshold:
+                #if True:
+                    print_indented(n_sp + 4, 'iB :', iB, ', bbox :', bbox, ', objectness : ', pred_xywh_c_cc[iB, 4], ', class confidences :', pred_xywh_c_cc[iB, 5:])
+                iB += 1
+            print_indented(n_sp + 3, 'iB :', iB);   #exit()
+            '''
+
             print('classification_per.shape :', classification_per.shape, '\ntransformed_anchors_ltrb_per.shape :', transformed_anchors_ltrb_per.shape, '\nscores_per[:, 0].shape :', scores_per[:, 0].shape, '\nscores_.shape :', scores_.shape, '\nclasses_.shape :', classes_.shape);   #exit(); 
             #   classification_per.shape : torch.Size([28, 2193])
             #   transformed_anchors_ltrb_per.shape : torch.Size([2193, 4])
             #   scores_per[:, 0].shape : torch.Size([2193])
             #   scores_.shape : torch.Size([2193])
             #   classes_.shape : torch.Size([2193])
+            '''
+            bbox_ori = letterbox_bbox_2_ori_bbox(transformed_anchors_ltrb_per, wh_net_input, wh_ori, letterbox_type, 'ltrb', (0, 0), n_sp + 2)
+            print('bbox_ori.shape :', bbox_ori.shape);  
+            for bbox in bbox_ori:
+                print('bbox :', bbox);
+            exit()
+            '''
             anchors_nms_idx = batched_nms(transformed_anchors_ltrb_per, scores_per[:, 0], classes_, iou_threshold=iou_threshold)
             print('anchors_nms_idx.shape :', anchors_nms_idx.shape);   #exit();
             print('anchors_nms_idx :', anchors_nms_idx);   #exit();
