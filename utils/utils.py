@@ -462,7 +462,8 @@ def compensate_division(li_ltrb_c_cc, li_group, li_str_class, ios_threshold, n_s
     li_ltrb_c_cc_filtered = []
     #for ii in range(len(li_ltrb_c_cc)):
     #    print_indented(n_sp + 1, 'ii :', ii, ', li_ltrb_c_cc[ii].shape : ', li_ltrb_c_cc[ii].shape);
-    li_id = [int(lrtb_c_cc[0, -1]) for lrtb_c_cc in li_ltrb_c_cc]
+    #li_id = [int(lrtb_c_cc[0, -1]) for lrtb_c_cc in li_ltrb_c_cc]
+    li_id = [int(lrtb_c_cc[-1]) for lrtb_c_cc in li_ltrb_c_cc]
     li_id_unique = list(set(li_id))
     li_id_very_unique = []
     li_li_str_unique = []
@@ -485,7 +486,8 @@ def compensate_division(li_ltrb_c_cc, li_group, li_str_class, ios_threshold, n_s
         for group in li_group:
             if str_cls in group:
                 gr = group; break;
-        li_ltrb_c_cc_same_cls = [ltrb_c_cc for ltrb_c_cc in li_ltrb_c_cc if li_str_class[int(ltrb_c_cc[0, -1])]      in gr]
+        #li_ltrb_c_cc_same_cls = [ltrb_c_cc for ltrb_c_cc in li_ltrb_c_cc if li_str_class[int(ltrb_c_cc[0, -1])]      in gr]
+        li_ltrb_c_cc_same_cls = [ltrb_c_cc for ltrb_c_cc in li_ltrb_c_cc if li_str_class[int(ltrb_c_cc[-1])]      in gr]
         if 1 >= len(li_ltrb_c_cc_same_cls):
             li_ltrb_c_cc_filtered.append(li_ltrb_c_cc_same_cls[0]);   continue
         for i0, ltrb_c_cc_same_cls_0 in enumerate(li_ltrb_c_cc_same_cls):
@@ -506,7 +508,7 @@ def compensate_division(li_ltrb_c_cc, li_group, li_str_class, ios_threshold, n_s
 
 
 
-def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, n_sp, conf_thres=0.5, nms_thres=0.5): #pred_letterbox.type() : torch.cuda.FloatTensor
+def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, use_pytorch_batched_nms, n_sp, conf_thres=0.5, nms_thres=0.5): #pred_letterbox.type() : torch.cuda.FloatTensor
 
     """
     Input :
@@ -585,7 +587,8 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
         #print('Some are remaining');    exit()
         # Select predicted classes
         class_conf = class_conf[i]
-        class_pred = class_pred[i].unsqueeze(1).float()
+        #class_pred = class_pred[i].unsqueeze(1).float()
+        class_pred = class_pred[i]
         
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         ltrb_c_cc = xywh_c_cc.clone()
@@ -594,73 +597,88 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
         # pred[:, 4] *= class_conf  # improves mAP from 0.549 to 0.551
         # Detections ordered as (x1y1x2y2, obj_conf, class_conf, class_pred)
         #pred = torch.cat((pred[:, :5], class_conf.unsqueeze(1), class_pred), 1)
-        ltrb_c_cc = torch.cat((ltrb_c_cc[:, :5], class_conf.unsqueeze(1), class_pred), 1)
-        
-        # Get detections sorted by decreasing confidence scores
-        #pred = pred[(-pred[:, 4]).argsort()]
-        ltrb_c_cc = ltrb_c_cc[(-ltrb_c_cc[:, 4]).argsort()]
         
         det_max = []
-        #nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
-        nms_style = 'OR'
-        #for c in pred[:, -1].unique():
-        for c in ltrb_c_cc[:, -1].unique():
-            dc = ltrb_c_cc[ltrb_c_cc[:, -1] == c]  # select class c
-            n = len(dc)
-            if n == 1:
-                det_max.append(dc)  # No NMS required if only 1 prediction
-                continue
-            elif n > 100:
-                dc = dc[:100]  # limit to first 100 boxes: https://github.com/ultralytics/yolov3/issues/117
-                
-            # Non-maximum suppression
-            if nms_style == 'OR':  # default
-                # METHOD1
-                # ind = list(range(len(dc)))
-                # while len(ind):
-                # j = ind[0]
-                # det_max.append(dc[j:j + 1])  # save highest conf detection
-                # reject = (bbox_iou(dc[j], dc[ind], 'ltrb') > nms_thres).nonzero()
-                # [ind.pop(i) for i in reversed(reject)]
-                
-                # METHOD2
-                while dc.shape[0]:
-                    det_max.append(dc[:1])  # save highest conf detection
-                    if len(dc) == 1:  # Stop if we're at the last detection
-                        break
-                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
-                    dc = dc[1:][iou < nms_thres]  # remove ious > threshold
+        ltrb_c_cc = torch.cat((ltrb_c_cc[:, :5], class_conf.unsqueeze(1), class_pred.unsqueeze(1).float()), 1)
+        if use_pytorch_batched_nms and isinstance(ltrb_c_cc, torch.Tensor):
+            anchors_nms_idx = batched_nms(ltrb_c_cc[:, :4], class_conf, class_pred, iou_threshold = nms_thres)
+            ltrb_c_cc = ltrb_c_cc[anchors_nms_idx]
+            det_max = list(ltrb_c_cc)
+        else:
+            #ltrb_c_cc = torch.cat((ltrb_c_cc[:, :5], class_conf.unsqueeze(1), class_pred.unsqueeze(1).float()), 1)
+            # Get detections sorted by decreasing confidence scores
+            #pred = pred[(-pred[:, 4]).argsort()]
+            ltrb_c_cc = ltrb_c_cc[(-ltrb_c_cc[:, 4]).argsort()]
+            
+            #nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
+            nms_style = 'OR'
+            #nms_style = 'SOFT'
+            #for c in pred[:, -1].unique():
+            for c in ltrb_c_cc[:, -1].unique():
+                dc = ltrb_c_cc[ltrb_c_cc[:, -1] == c]  # select class c
+                n = len(dc)
+                if n == 1:
+                    #det_max.append(dc)  # No NMS required if only 1 prediction
+                    det_max.append(dc.squeeze())  # No NMS required if only 1 prediction
+                    continue
+                elif n > 100:
+                    dc = dc[:100]  # limit to first 100 boxes: https://github.com/ultralytics/yolov3/issues/117
                     
-            elif nms_style == 'AND':  # requires overlap, single boxes erased
-                while len(dc) > 1:
-                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
-                    if iou.max() > 0.5:                            
-                        det_max.append(dc[:1])
-                    dc = dc[1:][iou < nms_thres]  # remove ious > threshold
+                # Non-maximum suppression
+                if nms_style == 'OR':  # default
+                    # METHOD1
+                    # ind = list(range(len(dc)))
+                    # while len(ind):
+                    # j = ind[0]
+                    # det_max.append(dc[j:j + 1])  # save highest conf detection
+                    # reject = (bbox_iou(dc[j], dc[ind], 'ltrb') > nms_thres).nonzero()
+                    # [ind.pop(i) for i in reversed(reject)]
+                    
+                    # METHOD2
+                    while dc.shape[0]:
+                        #t1 = dc[:1];    print('t1.shape :', t1.shape);  exit()
+                        #det_max.append(dc[:1])  # save highest conf detection
+                        det_max.append(dc[:1].squeeze())  # save highest conf detection
+                        if len(dc) == 1:  # Stop if we're at the last detection
+                            break
+                        iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
+                        dc = dc[1:][iou < nms_thres]  # remove ious > threshold
                         
-            elif nms_style == 'MERGE':  # weighted mixture box
-                #print('len(dc) :', len(dc));    exit();
-                while len(dc):
-                    if len(dc) == 1:
-                        det_max.append(dc)
-                        break
-                    i = bbox_iou(dc[0], dc, 'ltrb', n_sp + 3) > nms_thres  # iou with other boxes
-                    weights = dc[i, 4:5]
-                    dc[0, :4] = (weights * dc[i, :4]).sum(0) / weights.sum()
-                    det_max.append(dc[:1])
-                    dc = dc[i == 0]
-            elif nms_style == 'SOFT':  # soft-NMS https://arxiv.org/abs/1704.04503
-                sigma = 0.5  # soft-nms sigma parameter
-                while len(dc):
-                    if len(dc) == 1:
-                        det_max.append(dc)
-                        break
-                    det_max.append(dc[:1])
-                    iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
-                    dc = dc[1:]
-                    dc[:, 4] *= torch.exp(-iou ** 2 / sigma)  # decay confidences
-        
-        print_indented(n_sp + 2, 'det_max[0].shape :', det_max[0].shape);   # exit();
+                elif nms_style == 'AND':  # requires overlap, single boxes erased
+                    while len(dc) > 1:
+                        iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
+                        if iou.max() > 0.5:                            
+                            det_max.append(dc[:1].squeeze())
+                            #det_max.append(dc[:1])
+                        dc = dc[1:][iou < nms_thres]  # remove ious > threshold
+                            
+                elif nms_style == 'MERGE':  # weighted mixture box
+                    #print('len(dc) :', len(dc));    exit();
+                    while len(dc):
+                        if len(dc) == 1:
+                            #det_max.append(dc)
+                            det_max.append(dc.squeeze())
+                            break
+                        i = bbox_iou(dc[0], dc, 'ltrb', n_sp + 3) > nms_thres  # iou with other boxes
+                        weights = dc[i, 4:5]
+                        dc[0, :4] = (weights * dc[i, :4]).sum(0) / weights.sum()
+                        #det_max.append(dc[:1])
+                        det_max.append(dc[:1].squeeze())
+                        dc = dc[i == 0]
+                elif nms_style == 'SOFT':  # soft-NMS https://arxiv.org/abs/1704.04503
+                    sigma = 0.5  # soft-nms sigma parameter
+                    while len(dc):
+                        if len(dc) == 1:
+                            #det_max.append(dc)
+                            det_max.append(dc.squeeze())
+                            break
+                        #det_max.append(dc[:1])
+                        det_max.append(dc[:1].squeeze())
+                        iou = bbox_iou(dc[0], dc[1:], 'ltrb', n_sp + 3)  # iou with other boxes
+                        dc = dc[1:]
+                        dc[:, 4] *= torch.exp(-iou ** 2 / sigma)  # decay confidences
+            
+        #print_indented(n_sp + 2, 'det_max[0].shape :', det_max[0].shape);   # exit();
         print_indented(n_sp + 2, 'len(det_max) :', len(det_max));    #exit();
         if include_original:
             print_indented(n_sp + 3, 'len(det_max) b4 :', len(det_max));    #exit();
@@ -668,7 +686,9 @@ def non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original,
             det_max = compensate_division(det_max, li_group, li_str_class, ios_threshold, n_sp + 3)
             print_indented(n_sp + 3, 'len(det_max) after :', len(det_max));    #exit();
         if len(det_max):
-            det_max = torch.cat(det_max)  # concatenate
+            #det_max = torch.cat(det_max)  # concatenate
+            det_max = torch.stack(det_max)  # concatenate
+            #print('det_max.shape :', det_max.shape);    exit()
             output[image_i] = det_max[(-det_max[:, 4]).argsort()]  # sort
     #exit()
 
@@ -686,7 +706,7 @@ def ltrb_2_xywh(ltrb):
     return xywh
 
 
-def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp, letterbox_type, wh_ori, wh_tile = None, li_offset_xy = None, include_original = None, li_group = None, li_str_class = None):
+def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp, letterbox_type, wh_ori, use_pytorch_batched_nms = False, wh_tile = None, li_offset_xy = None, include_original = None, li_group = None, li_str_class = None):
     print_indented(n_sp, "postprocess START")
     is_mosaic = li_offset_xy is not None
     batch_size, n_chn_input, h_input, w_input = x.shape
@@ -762,7 +782,7 @@ def postprocess(x, anchors_tlbr, regression_yxhw, classification, regressBoxes, 
         #print('pred_xywh_c_cc.shape :', pred_xywh_c_cc.shape);  exit()
         ##  pred_xywh_c_cc.shape : torch.Size([1, 49104, 33])   #   33 = 4 + 1 + 28
         #print_indented(n_sp + 1, 'type(im_bgr_hwc_ori_np) :', type(im_bgr_hwc_ori_np)); exit()
-        li_ltrb_c_cc = non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, n_sp + 1, threshold, iou_threshold);
+        li_ltrb_c_cc = non_max_suppression_4_mosaic(pred_xywh_c_cc, li_offset_xy, include_original, li_group, wh_net_input, wh_tile, wh_ori, li_str_class, ios_threshold, letterbox_type, bbox_type, use_pytorch_batched_nms, n_sp + 1, threshold, iou_threshold);
         #print('anchors_nms_idx.shape :', anchors_nms_idx.shape);   exit();
         #print_indented(n_sp + 1, 'li_ltrb_c_cc[0].shape :', li_ltrb_c_cc[0].shape);   exit();
         #   anchors_nms_idx[0].shape : torch.Size([6, 7])

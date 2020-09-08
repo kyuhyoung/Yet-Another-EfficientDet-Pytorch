@@ -459,7 +459,7 @@ class LoadImages:  # for inference
     def __len__(self):
         return self.nF  # number of files
 
-def test(model, dir_img, input_size, threshold, iou_threshold, ios_threshold, use_cuda, device, prediction_dir, shall_mosaic, letterbox_type, n_sp):
+def test(model, dir_img, input_size, threshold, iou_threshold, ios_threshold, use_cuda, device, prediction_dir, shall_mosaic, letterbox_type, use_pytorch_batched_nms, n_sp):
     print_indented(n_sp, 'test STRAT')
     class_name = {1 : 'bus', 2 : 'car', 3 :'carrier', 4 : 'cat', 5 : 'dog', 
                   6 : 'motorcycle', 7 : 'movable_signage', 8 : 'person', 9 : 'scooter', 10 : 'stroller', 
@@ -587,7 +587,7 @@ def test(model, dir_img, input_size, threshold, iou_threshold, ios_threshold, us
         
         #if is_mosaic:
         #print('threshold :', threshold);    exit()
-        out = postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp + 2, letterbox_type, wh_ori, wh_tile, li_offset_xy, include_original, li_group, obj_list)
+        out = postprocess(x, anchors, regression, classification, regressBoxes, clipBoxes, threshold, iou_threshold, ios_threshold, n_sp + 2, letterbox_type, wh_ori, use_pytorch_batched_nms, wh_tile, li_offset_xy, include_original, li_group, obj_list)
 
 
         print_indented(n_sp + 2, 'len(ori_imgs) :', len(ori_imgs));   #exit()
@@ -867,6 +867,7 @@ def main():
     #parser.add_argument('--debug', type=boolean_string, default=False, help='whether visualize the predicted boxes of training, '
     args.add_argument('--debug', type=boolean_string, default=True, help='whether visualize the predicted boxes of training. The output images will be in test/')
     args.add_argument('--is_mosaic', action='store_true', help='whether split the image into small overlaped sub-images to detect small objects.')
+    args.add_argument('--use_pytorch_batched_nms', action='store_true', help='whether use batched_nms of torchvision for mosaic mode.')
     args.add_argument('--xywh', type=boolean_string, default=False, help='whether bounding box representation is left-top-width-height or not.')
     '''
     for ii in range(100):
@@ -906,6 +907,7 @@ def main():
     batch = config.batch_size
     mode = config.mode
     is_mosaic = config.is_mosaic
+    use_pytorch_batched_nms = config.use_pytorch_batched_nms
     #print('is_mosaic :', is_mosaic);    exit(0)
     prediction_dir = config.prediction_dir + "_" + mode
     #print('prediction_dir :', prediction_dir);  exit(0);
@@ -1010,7 +1012,7 @@ def main():
         #test_generator = DataLoader(test_set, **test_params)
         #data_loader_test = dataloader.data_loader(DATASET_PATH, 1, config.xywh, phase='test')        
         #data_loader_test = dataloader.data_loader(DATASET_PATH, config.batch_size, config.xywh, phase='test')        
-        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.ios_threshold, config.cuda, device, prediction_dir, is_mosaic, config.letterbox_type, n_sp + 1)
+        test(model, os.path.join(DATASET_PATH, mode), input_sizes[config.compound_coef], config.threshold, config.iou_threshold, config.ios_threshold, config.cuda, device, prediction_dir, is_mosaic, config.letterbox_type, use_pytorch_batched_nms, n_sp + 1)
     print("That's it!")
 
 if __name__ == '__main__' :
